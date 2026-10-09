@@ -110,11 +110,13 @@ MOVIE_NUMBER_PATTERNS: list[tuple[Pattern[str], Formatter]] = [
 
 # 域名/站点水印：主机名只允许字母数字（不含 ``-``，避免把 ``n1335-kan224.com`` 的
 # 番号前缀一起吃掉）；TLD 后允许紧跟 ``_``、``]`` 等非字母数字字符
-# （hjd2048.com_ABP821 必须整段剥掉而不是让 hjd2048 冒充番号）。
+# （hjd2048.com_ABP821 必须整段剥掉而不是让 hjd2048 冒充番号），也允许直接粘住
+# 带分隔符的番号（4k2.meabf-391.mp4）；但后面是更长单词时不算边界
+# （x.memories123 的 me 不能被剥掉）。
 _DOMAIN_PATTERN = re.compile(
     r"(?:[a-zA-Z0-9]+\.)+"
     r"(?:com|cn|net|org|gov|edu|me|la|cc|tv|info|xyz|vip|one|app|biz|top|pw|io|co|jp|site|online)"
-    r"(?![a-zA-Z0-9])",
+    r"(?=[^a-zA-Z0-9]|[a-zA-Z]{2,10}[-_]\d{2,5}|$)",
     re.IGNORECASE,
 )
 

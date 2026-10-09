@@ -256,6 +256,11 @@ hjd2048.com-0119abp821-h264.mp4	ABP-821
 hjd2048.com-0626mifd046-h264.mp4	MIFD-046
 hjd2048.com-0713ipx177-h264.mp4	IPX-177
 hjd2048.com-0820kawd925-h264.mp4	KAWD-925
+4k2.meabf-391.mp4	ABF-391
+4k2.memida-455.mp4	MIDA-455
+4k2.meyd424.mp4	MEYD-424
+4k2.comabf-391.mp4	ABF-391
+4k2.memeyd-424.mp4	MEYD-424
 hmnf-063.mp4	HMNF-063
 hmnf063-5.mp4	HMNF-063
 hunt-927.wmv	HUNT-927

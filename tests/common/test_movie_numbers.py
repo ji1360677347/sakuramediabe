@@ -28,6 +28,26 @@ class TestParseMovieNumberFromText:
         # remove_disturb 先剥域名，站点水印不会被误识别成番号。
         assert parse_movie_number_from_text("hjd2048.com-0602meyd424") == "MEYD-424"
 
+    def test_glued_site_watermark_removed_before_matching(self):
+        # 站点域名与番号直接粘连（TLD 后紧跟带分隔符的番号）时必须剥掉，避免水印尾部吃进番号。
+        assert parse_movie_number_from_text("4k2.meabf-391.mp4") == "ABF-391"
+        assert parse_movie_number_from_text("4k2.memida-455.mp4") == "MIDA-455"
+        # 导入链路实际传入的是“文件名 + 相对路径”，粘连水印在两处都要剥。
+        assert (
+            parse_movie_number_from_text("4k2.meabf-391.mp4 abf-391/4k2.meabf-391.mp4")
+            == "ABF-391"
+        )
+        # 规则不绑定 4k2.me：任意 TLD 与带分隔符的番号粘连都算水印边界。
+        assert parse_movie_number_from_text("4k2.comabf-391.mp4") == "ABF-391"
+        # 以 me 开头的番号带水印粘连时同样剥得干净（水印 me + meyd-424）。
+        assert parse_movie_number_from_text("4k2.memeyd-424.mp4") == "MEYD-424"
+
+    def test_glued_watermark_requires_separated_code(self):
+        # 无水印分隔符时不剥 TLD，保护以 me 开头的番号（meyd424 不能被截成 yd424）。
+        assert parse_movie_number_from_text("4k2.meyd424.mp4") == "MEYD-424"
+        # 后接更长单词时 TLD 也不是边界，不能把 x.memories123 切成 mories123。
+        assert parse_movie_number_from_text("x.memories123.mp4") == "MEMORIES-123"
+
     def test_letter_series_not_truncated_after_punctuation(self):
         # 水印/域名残片后紧跟番号时，不能从第二个字母起截出假番号。
         assert (
