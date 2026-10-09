@@ -30,16 +30,18 @@ jobs:
         run: |
           set -euo pipefail
 
-          # 预发布版本不参与 Docker 正式发版，避免测试版本污染正式镜像。
-          if [ "$IS_PRERELEASE" = "true" ]; then
-            echo "::error::Pre-release does not trigger Docker publish"
-            exit 1
-          fi
-
           # 版本号保持 v 开头约定，避免 Docker 镜像标签和 Release 命名混乱。
           if ! printf '%s' "$VERSION" | grep -Eq '^v[0-9].*'; then
             echo "::error::Version must match ^v[0-9].*"
             exit 1
+          fi
+
+          # 预发布版只推自己的 tag、不更新 latest，但仍按 beta 版本号约定命名。
+          if [ "$IS_PRERELEASE" = "true" ]; then
+            if ! printf '%s' "$VERSION" | grep -Eq '^v[0-9]+\.[0-9]+\.[0-9]+-beta\.[0-9]+$'; then
+              echo "::error::Pre-release version must match ^v<major>.<minor>.<patch>-beta.<N>$"
+              exit 1
+            fi
           fi
 
       - name: Checkout main branch
@@ -66,7 +68,7 @@ jobs:
 
           TAG_COMMIT="$(git rev-list -n 1 "$VERSION")"
 
-          # 正式发版要求 tag 指向 main 上的提交，避免从临时分支直接发正式版。
+          # 发版要求 tag 指向 main 上的提交，避免从临时分支直接发版。
           if ! git merge-base --is-ancestor "$TAG_COMMIT" "origin/$DEFAULT_BRANCH"; then
             echo "::error::Release tag $VERSION is not on origin/$DEFAULT_BRANCH"
             exit 1
@@ -92,7 +94,7 @@ jobs:
           images: ${{ secrets.DOCKERHUB_USERNAME }}/${{ env.IMAGE_NAME }}
           tags: |
             type=raw,value=${{ github.event.release.tag_name }}
-            type=raw,value=latest
+            type=raw,value=latest,enable=${{ !github.event.release.prerelease }}
 
       - name: Build and push
         uses: docker/build-push-action@v6
