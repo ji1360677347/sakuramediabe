@@ -79,3 +79,8 @@ def list_task_runs(
         trigger_type=trigger_type,
         sort=sort,
     )
+
+
+@router.get("/system/task-runs/{task_run_id}", response_model=TaskRunResource)
+def get_task_run(task_run_id: int):
+    return ActivityService.get_task_run(task_run_id)

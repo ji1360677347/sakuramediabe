@@ -93,8 +93,7 @@ def test_create_app_registers_videos_routes():
     assert "/videos/{video_id}" in paths
     assert "/video-collections" in paths
     assert "/video-collections/{collection_id}" in paths
-    assert "/video-collections/{collection_id}/items" in paths
-    assert "/video-collections/{collection_id}/items/reorder" in paths
+    assert "/video-collections/{collection_id}/videos" in paths
     assert "/video-collections/{collection_id}/videos/{video_item_id}" in paths
     assert "/video-imports" not in paths
 
@@ -299,6 +298,8 @@ def test_create_app_does_not_register_removed_api_endpoints():
         ("/imports/{task_run_id}/failed-items/{item_id}/search", "POST"),
         ("/media/{media_id}/points", "POST"),
         ("/media/{media_id}/points/{point_id}", "DELETE"),
+        ("/video-collections/{collection_id}/items", "POST"),
+        ("/video-collections/{collection_id}/items/reorder", "POST"),
         ("/video-collections/{collection_id}/items/{item_id}", "DELETE"),
         ("/status/metadata-providers/{provider}/test", "GET"),
         ("/indexer-settings/test", "GET"),
@@ -316,6 +317,8 @@ def test_create_app_registers_operation_endpoints():
 
     assert ("/system/notifications", "PATCH") in route_methods
     assert ("/system/jobs/{task_key}/runs", "POST") in route_methods
+    assert ("/system/task-runs/{task_run_id}", "GET") in route_methods
+    assert ("/healthz", "GET") in route_methods
     assert ("/movie-subscriptions/search/reset", "POST") in route_methods
     assert ("/media/thumbnails/reset", "POST") in route_methods
     assert ("/media-points", "POST") in route_methods
@@ -349,6 +352,13 @@ def test_create_app_runs_runtime_startup_jobs(monkeypatch):
         pass
 
     assert events == ["db.ready"]
+
+
+def test_healthz_is_reachable_without_authentication(client):
+    response = client.get("/healthz")
+
+    assert response.status_code == 200
+    assert response.json() == {"status": "ok"}
 
 
 def test_create_app_sets_peewee_logger_level_from_settings(monkeypatch):

@@ -38,7 +38,7 @@ COLLECTION_OPERATIONS = frozenset(
 class BatchOperationRequest(SchemaModel):
     operation: BatchOperationType
     # 各操作的 ids 语义：媒体/切片/时刻/视频/下载任务的单实体 id；
-    # 合集成员操作分别为 clip_id / point_id / video_item_id（remove 为成员 item_id）。
+    # 合集成员操作统一为成员实体 id：clip_id / point_id / video_item_id（add 与 remove 同键）。
     ids: list[int] = Field(min_length=1, max_length=1000)
     target_collection_id: int | None = Field(default=None, gt=0)
     delete_files: bool = False

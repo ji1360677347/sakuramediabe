@@ -244,7 +244,7 @@ class VideoCollectionService:
         offset: int | None = None,
         limit: int | None = None,
     ) -> list[VideoCollectionItemResource]:
-        """查询并组装成员资源列表。[offset]/[limit] 为 None 时返回全部（供 reorder 用）。"""
+        """查询并组装成员资源列表；[offset]/[limit] 为 None 时返回全部。"""
         first_media, first_media_id = VideoItemService._first_media_alias()
         first_library = MediaLibrary.alias()
         # 默认 position 升序（合集手动顺序，前端据此顺序播放）；另支持入库时间/标题/时长/文件大小排序。
@@ -303,7 +303,6 @@ class VideoCollectionService:
             )
             items.append(
                 VideoCollectionItemResource(
-                    item_id=link.id,
                     position=link.position,
                     play_url=play_url,
                     # 0 为「无媒体」哨兵，归一为 None。
@@ -331,7 +330,7 @@ class VideoCollectionService:
         return (current_max if current_max is not None else -1) + 1
 
     @classmethod
-    def add_item(cls, collection_id: int, video_item_id: int) -> None:
+    def add_video(cls, collection_id: int, video_item_id: int) -> None:
         collection = cls._require_collection(collection_id)
         video = cls._require_video(video_item_id)
         existing = VideoCollectionItem.get_or_none(
@@ -357,23 +356,7 @@ class VideoCollectionService:
             return
 
     @classmethod
-    def remove_item(cls, collection_id: int, item_id: int) -> None:
-        collection = cls._require_collection(collection_id)
-        deleted = (
-            VideoCollectionItem.delete()
-            .where(
-                VideoCollectionItem.id == item_id,
-                VideoCollectionItem.collection == collection,
-            )
-            .execute()
-        )
-        if deleted:
-            cls._touch_collection(collection, utc_now_for_db())
-
-    @classmethod
-    def remove_items_by_video_ids(
-        cls, collection_id: int, video_ids: list[int]
-    ) -> None:
+    def remove_videos(cls, collection_id: int, video_ids: list[int]) -> None:
         """按视频 id 批量移除合集成员；不是成员的静默跳过。"""
         collection = cls._require_collection(collection_id)
         normalized = list(dict.fromkeys(video_ids))
@@ -392,30 +375,30 @@ class VideoCollectionService:
                 cls._touch_collection(collection, utc_now_for_db())
 
     @classmethod
-    def reorder_items(cls, collection_id: int, ordered_item_ids: list[int]) -> list[VideoCollectionItemResource]:
+    def set_videos(cls, collection_id: int, video_item_ids: list[int]) -> None:
+        """幂等地把合集成员设置为给定有序列表，既覆盖重排也覆盖批量设置成员。"""
         collection = cls._require_collection(collection_id)
-        existing_ids = {
-            link.id
-            for link in VideoCollectionItem.select(VideoCollectionItem.id).where(
-                VideoCollectionItem.collection == collection
-            )
-        }
-        normalized = list(dict.fromkeys(ordered_item_ids))
-        # 校验：给出的 item_id 必须恰好覆盖该合集的全部成员，避免漏排或越权。
-        if set(normalized) != existing_ids:
-            raise ApiError(
-                422,
-                "invalid_collection_reorder",
-                "ordered_item_ids must cover exactly all collection items",
-                {"collection_id": collection_id},
-            )
+        # 去重保序：同一视频在合集内只出现一次，以首次出现的位置为准。
+        ordered_ids: list[int] = []
+        seen: set[int] = set()
+        for video_item_id in video_item_ids:
+            if video_item_id not in seen:
+                seen.add(video_item_id)
+                ordered_ids.append(video_item_id)
+        for video_item_id in ordered_ids:
+            cls._require_video(video_item_id)
+
         touched_at = utc_now_for_db()
         with get_database().atomic():
-            for position, item_id in enumerate(normalized):
-                item = VideoCollectionItem.get_by_id(item_id)
-                item.position = position
-                item.updated_at = touched_at
-                item.save(only=[VideoCollectionItem.position, VideoCollectionItem.updated_at])
+            VideoCollectionItem.delete().where(
+                VideoCollectionItem.collection == collection
+            ).execute()
+            for position, video_item_id in enumerate(ordered_ids):
+                VideoCollectionItem.create(
+                    collection=collection,
+                    video_item=video_item_id,
+                    position=position,
+                    created_at=touched_at,
+                    updated_at=touched_at,
+                )
             cls._touch_collection(collection, touched_at)
-        # 返回重排后的全部成员（position 升序，无需分页 / 播放地址）。
-        return cls._query_item_resources(collection)

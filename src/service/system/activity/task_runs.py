@@ -5,7 +5,7 @@ from typing import Any
 
 from src.api.exception.errors import ApiError
 from src.common.runtime_time import utc_now_for_db
-from src.common.service_helpers import validate_page
+from src.common.service_helpers import require_by_id, validate_page
 from src.model import BackgroundTaskRun
 from src.model.base import get_database
 from src.schema.common.pagination import PageResponse
@@ -374,3 +374,9 @@ class TaskRunService:
             .order_by(BackgroundTaskRun.started_at.desc(), BackgroundTaskRun.id.desc())
         )
         return [cls.to_task_run_resource(item) for item in query]
+
+    @classmethod
+    def get_task_run(cls, task_run_id: int) -> TaskRunResource:
+        return cls.to_task_run_resource(
+            require_by_id(BackgroundTaskRun, task_run_id, "task_run")
+        )

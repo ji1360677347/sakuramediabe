@@ -1,9 +1,8 @@
 from .collections import (
     VideoCollectionCreateRequest,
-    VideoCollectionItemAddRequest,
     VideoCollectionItemResource,
-    VideoCollectionReorderRequest,
     VideoCollectionResource,
+    VideoCollectionSetVideosRequest,
     VideoCollectionUpdateRequest,
 )
 from .items import (
@@ -13,10 +12,9 @@ from .items import (
 
 __all__ = [
     "VideoCollectionCreateRequest",
-    "VideoCollectionItemAddRequest",
     "VideoCollectionItemResource",
-    "VideoCollectionReorderRequest",
     "VideoCollectionResource",
+    "VideoCollectionSetVideosRequest",
     "VideoCollectionUpdateRequest",
     "VideoItemDetailResource",
     "VideoItemListItemResource",

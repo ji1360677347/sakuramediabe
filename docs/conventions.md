@@ -8,7 +8,7 @@
 - 同类接口保持一致的命名、参数、响应和错误语义，避免让客户端为相同能力编写多套处理逻辑。
 - 请求和响应通过 Schema 明确定义并校验，不直接暴露数据库模型、内部路径或敏感凭据。
 - router 只负责参数接入、依赖与响应，业务编排放在 service，避免在接口层堆积复杂逻辑。
-- 读取操作不改变业务状态；耗时操作建模为任务资源，返回任务标识供客户端查询进度和结果。
+- 读取操作不改变业务状态；耗时操作建模为任务资源，返回任务标识供客户端查询进度和结果，查询入口为 `GET /system/task-runs/{task_run_id}`。
 - 默认要求认证，普通接口通过统一依赖校验身份，媒体文件通过 URL 签名校验访问权限；校验通过后才能读取数据或执行操作。
 - 只实现当前需求，不为未确定的场景增加抽象、兼容分支或额外接口。
 
@@ -36,6 +36,18 @@
 - 连接/配置探测统一 `POST /<资源>/test`，如 `POST /download-clients/test`、`POST /metadata-providers/{provider}/test`；探测有外部副作用与延迟，不使用 `GET`
 - 批量状态设置使用 `PATCH /<集合资源>`，请求体为 `{"ids": [...] 或 "all": true, ...被设置字段}`，如 `PATCH /system/notifications`
 - 外部元数据搜索并导入使用 `POST /<域>/metadata-imports`，响应为 SSE 事件流，外部来源由服务端解析，不写入路径
+- `POST /batch-operations` 是有意的批量例外：服务前端多选场景，返回 `task_run_id` 走任务资源约定
+
+## 合集成员约定
+
+合集（playlists / clip-collections / moment-collections / video-collections）统一采用同一成员协议，成员路径使用成员实体的复数名与实体标识（`movies/{movie_number}`、`clips/{clip_id}`、`points/{point_id}`、`videos/{video_item_id}`）：
+
+- `GET /<coll>/{id}/<members>`：分页成员列表，成员行含 `position` 等展示字段
+- `PUT /<coll>/{id}/<members>/{entity_id}`：幂等加入，追加到末尾
+- `DELETE /<coll>/{id}/<members>/{entity_id}`：幂等移出，非成员调用同样成功
+- `PUT /<coll>/{id}/<members>`：幂等整体设置（请求体为有序实体 id 列表），既覆盖重排也覆盖批量设置；仅对有顺序语义的合集提供
+
+成员行 id、成员实体 id 不混用：路径与请求体里的成员标识一律是成员实体的 id。
 
 ## 系统配置类资源约定
 
@@ -132,7 +144,8 @@
 
 ## 认证约定
 
-- **除登录接口外，所有接口均需鉴权：普通接口使用 Bearer Token，媒体文件使用 URL 签名校验。**
+- **除登录接口与探活接口外，所有接口均需鉴权：普通接口使用 Bearer Token，媒体文件使用 URL 签名校验。**
+- `GET /healthz` 是探活接口，免鉴权、不查库，仅供部署侧容器 healthcheck 使用。
 - 登录接口使用账号密码换取令牌，无需预先提供 Bearer Token；入口为 `POST /auth/tokens`，`POST /auth/docs-token` 是 API 调试文档使用的同类登录入口。
 - 除媒体文件访问外，其他接口统一使用 `Authorization: Bearer <access_token>`，通过共享的 `get_current_user` 依赖完成认证；令牌刷新、状态查询、媒体信息查询及插件管理接口均遵守此规则。
 - 媒体文件访问是 Bearer Token 的例外：图片、视频播放流、字幕和片段文件通过 URL 中的 `expires + signature` 校验，无需额外携带 Bearer Token。统一复用 `src/common/file_signatures.py` 的签名与过期时间算法，缺少签名、签名无效或过期时返回 `403 Forbidden`。
@@ -158,6 +171,7 @@
 - 本规范不追求 HATEOAS
 - 本规范不提供旧接口迁移映射
 - 本规范不以当前实现代码为约束
+- 本规范不做 API 版本化：前后端配套发布，路径不带版本前缀
 
 ## 插件接口约定
 

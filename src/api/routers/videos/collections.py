@@ -5,10 +5,9 @@ from src.api.routers.deps import db_deps, get_current_user
 from src.schema.common.pagination import PageResponse
 from src.schema.videos.collections import (
     VideoCollectionCreateRequest,
-    VideoCollectionItemAddRequest,
     VideoCollectionItemResource,
-    VideoCollectionReorderRequest,
     VideoCollectionResource,
+    VideoCollectionSetVideosRequest,
     VideoCollectionUpdateRequest,
 )
 from src.service.videos import VideoCollectionService
@@ -46,8 +45,8 @@ def delete_collection(collection_id: int):
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
-@router.get("/{collection_id}/items", response_model=PageResponse[VideoCollectionItemResource])
-def list_collection_items(
+@router.get("/{collection_id}/videos", response_model=PageResponse[VideoCollectionItemResource])
+def list_collection_videos(
     collection_id: int,
     sort: str | None = Query(default=None),
     page: int = 1,
@@ -63,19 +62,21 @@ def list_collection_items(
     )
 
 
-@router.post("/{collection_id}/items", status_code=status.HTTP_204_NO_CONTENT)
-def add_collection_item(collection_id: int, payload: VideoCollectionItemAddRequest):
-    VideoCollectionService.add_item(collection_id, payload.video_item_id)
+@router.put("/{collection_id}/videos/{video_item_id}", status_code=status.HTTP_204_NO_CONTENT)
+def add_collection_video(collection_id: int, video_item_id: int):
+    """幂等追加到合集末尾（已存在则无副作用）。"""
+    VideoCollectionService.add_video(collection_id, video_item_id)
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
 @router.delete("/{collection_id}/videos/{video_item_id}", status_code=status.HTTP_204_NO_CONTENT)
 def remove_collection_video(collection_id: int, video_item_id: int):
     """按视频 id 移出合集；加入合集弹窗做勾选切换时用，无需成员行 id。幂等。"""
-    VideoCollectionService.remove_items_by_video_ids(collection_id, [video_item_id])
+    VideoCollectionService.remove_videos(collection_id, [video_item_id])
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
-@router.post("/{collection_id}/items/reorder", response_model=list[VideoCollectionItemResource])
-def reorder_collection_items(collection_id: int, payload: VideoCollectionReorderRequest):
-    return VideoCollectionService.reorder_items(collection_id, payload.ordered_item_ids)
+@router.put("/{collection_id}/videos", status_code=status.HTTP_204_NO_CONTENT)
+def set_collection_videos(collection_id: int, payload: VideoCollectionSetVideosRequest):
+    VideoCollectionService.set_videos(collection_id, payload.video_item_ids)
+    return Response(status_code=status.HTTP_204_NO_CONTENT)

@@ -97,6 +97,11 @@ def create_app() -> FastAPI:
     if slow_log_enabled():
         app.add_middleware(SlowRequestLoggingMiddleware)
 
+    # 容器探活：免鉴权、不查库，供部署侧 healthcheck 使用。
+    @app.get("/healthz", include_in_schema=False)
+    def healthz():
+        return {"status": "ok"}
+
     app.include_router(actors_router)
     app.include_router(movies_router)
     app.include_router(movie_subscriptions_router)

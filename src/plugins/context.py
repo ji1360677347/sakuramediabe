@@ -1160,7 +1160,7 @@ class CollectionApi:
                 {"video_ids": missing},
             )
         for video_id in normalized:
-            VideoCollectionService.add_item(target.id, video_id)
+            VideoCollectionService.add_video(target.id, video_id)
         return self._to_collection("video", target)
 
     def remove_video_items(
@@ -1173,7 +1173,7 @@ class CollectionApi:
 
         target = self._resolve_video_collection(collection)
         normalized = self._normalize_video_ids(video_ids)
-        VideoCollectionService.remove_items_by_video_ids(target.id, normalized)
+        VideoCollectionService.remove_videos(target.id, normalized)
         return self._to_collection("video", target)
 
 

@@ -136,7 +136,7 @@ class BatchOperationTaskService:
             )
 
             collection_id = request.target_collection_id
-            return lambda video_id: VideoCollectionService.add_item(
+            return lambda video_id: VideoCollectionService.add_video(
                 collection_id, video_id
             )
         if operation is BatchOperationType.VIDEO_COLLECTION_REMOVE:
@@ -145,8 +145,8 @@ class BatchOperationTaskService:
             )
 
             collection_id = request.target_collection_id
-            return lambda item_id: VideoCollectionService.remove_item(
-                collection_id, item_id
+            return lambda video_id: VideoCollectionService.remove_videos(
+                collection_id, [video_id]
             )
         if operation is BatchOperationType.DOWNLOAD_TASK_DELETE:
             from src.service.transfers.downloads.task_service import (

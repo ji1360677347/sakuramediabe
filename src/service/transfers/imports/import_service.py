@@ -501,7 +501,7 @@ class MediaImportService:
                                     VideoCollectionService,
                                 )
 
-                                VideoCollectionService.add_item(collection_id, video.id)
+                                VideoCollectionService.add_video(collection_id, video.id)
                         created_video_ids.append(video.id)
                 except ProviderOperationError as exc:
                     failed_count += 1

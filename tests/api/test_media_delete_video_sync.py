@@ -60,6 +60,6 @@ def test_delete_video_owned_media_removes_entry_and_collection_membership(
     # 相同文件的另一条重复视频保持独立，不被连带删除。
     assert Media.get_or_none(Media.id == other_media.id) is not None
     assert VideoItem.get_or_none(VideoItem.id == other_video.id) is not None
-    members = client.get(f"/video-collections/{collection.id}/items", headers=headers)
+    members = client.get(f"/video-collections/{collection.id}/videos", headers=headers)
     assert members.status_code == 200, members.text
     assert [item["video"]["id"] for item in members.json()["items"]] == [other_video.id]

@@ -27,8 +27,7 @@ class VideoCollectionResource(SchemaModel):
 
 
 class VideoCollectionItemResource(SchemaModel):
-    # 合集成员，position 决定顺序播放次序。
-    item_id: int
+    # 合集成员，position 决定顺序播放次序；成员键即 video.id（同一视频在合集内唯一）。
     position: int
     video: VideoItemListItemResource
     # 连播页所需「首个媒体」（Media.id 升序）的签名播放地址；仅在 include_play_url=True
@@ -68,10 +67,6 @@ class VideoCollectionUpdateRequest(SchemaModel):
         return normalized
 
 
-class VideoCollectionItemAddRequest(SchemaModel):
-    video_item_id: int = Field(gt=0)
-
-
-class VideoCollectionReorderRequest(SchemaModel):
-    # 按目标顺序给出合集成员 item_id 列表，service 据此重写 position。
-    ordered_item_ids: list[int] = Field(min_length=1)
+class VideoCollectionSetVideosRequest(SchemaModel):
+    # 幂等地把合集成员设置为这个有序列表，既覆盖重排也覆盖批量设置成员。
+    video_item_ids: list[int] = Field(min_length=1)
