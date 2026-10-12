@@ -106,15 +106,6 @@ class MediaService:
         return require_by_id(Media, media_id, "media", error_message="Media not found")
 
     @staticmethod
-    def _require_media_point_for_media(media_id: int, point_id: int) -> MediaPoint:
-        return require_record(
-            MediaPoint, MediaPoint.id == point_id, MediaPoint.media == media_id,
-            error_code="media_point_not_found",
-            error_message="Media point not found",
-            error_details={"media_id": media_id, "point_id": point_id},
-        )
-
-    @staticmethod
     def _to_media_point_resource(point: MediaPoint) -> MediaPointResource:
         return MediaPointResource(
             point_id=point.id,
@@ -600,11 +591,6 @@ class MediaService:
         return cls._to_media_point_resource(point), True
 
     @classmethod
-    def delete_point(cls, media_id: int, point_id: int) -> None:
-        cls._require_media(media_id)
-        point = cls._require_media_point_for_media(media_id, point_id)
-        cls.delete_point_by_id(point.id)
-
     @classmethod
     def delete_point_by_id(cls, point_id: int) -> None:
         with get_database().atomic():

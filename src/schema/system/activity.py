@@ -1,6 +1,8 @@
 from datetime import datetime
 from typing import Any
 
+from pydantic import model_validator
+
 from src.schema.common.base import SchemaModel
 from src.schema.common.pagination import PageResponse
 
@@ -46,14 +48,21 @@ class NotificationReadResponse(SchemaModel):
     read_at: datetime | None = None
 
 
-class NotificationReadBatchRequest(SchemaModel):
-    # 批量标记已读的目标通知 ID 列表。
-    ids: list[int]
+class NotificationUpdateRequest(SchemaModel):
+    # 批量设置已读状态：ids 指定目标通知，或 all=true 全量，二者互斥。
+    ids: list[int] | None = None
+    all: bool = False
+    is_read: bool
+
+    @model_validator(mode="after")
+    def validate_target(self) -> "NotificationUpdateRequest":
+        if self.all == bool(self.ids):
+            raise ValueError("必须提供 ids 或 all=true，且二者不可同时提供")
+        return self
 
 
-class NotificationBatchReadResponse(SchemaModel):
-    # 标记已读结果：本次新置为已读的条数，以及操作后剩余未读总数。
-    # 按 ID 批量（read）与全部已读（read-all）共用此响应。
+class NotificationUpdateResponse(SchemaModel):
+    # 状态更新结果：本次实际变更条数，以及操作后剩余未读总数。
     updated_count: int
     unread_count: int
 

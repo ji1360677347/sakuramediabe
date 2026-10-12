@@ -6,10 +6,10 @@ from src.api.routers.deps import db_deps, get_current_user
 from src.schema.catalog.actors import (
     ActorDetailResource,
     ActorFilterOptionsResource,
-    ActorJavdbSearchRequest,
     ActorListGender,
     ActorListSubscriptionStatus,
     ActorMergeRequest,
+    ActorMetadataImportRequest,
     ActorResource,
     ActorUpdateRequest,
     YearResource,
@@ -83,9 +83,9 @@ def get_actor_filter_options(
     )
 
 
-@router.post("/search/javdb/stream")
-def search_javdb_actor_stream(
-    payload: ActorJavdbSearchRequest,
+@router.post("/metadata-imports")
+def create_actor_metadata_import(
+    payload: ActorMetadataImportRequest,
 ):
     def stream():
         for (

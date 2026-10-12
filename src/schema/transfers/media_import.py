@@ -93,17 +93,6 @@ class ImportMetadataSourceErrorResource(SchemaModel):
     detail: str
 
 
-class ImportMetadataSearchRequest(SchemaModel):
-    movie_number: str = Field(min_length=1, max_length=255)
-
-    @model_validator(mode="after")
-    def validate_movie_number(self) -> "ImportMetadataSearchRequest":
-        self.movie_number = self.movie_number.strip()
-        if not self.movie_number:
-            raise ValueError("movie_number cannot be blank")
-        return self
-
-
 class ImportMetadataSearchResponse(SchemaModel):
     movie_number: str
     candidates: list[ImportMetadataCandidateResource] = Field(default_factory=list)

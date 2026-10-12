@@ -44,7 +44,7 @@ def test_parameterized_job_trigger_preserves_missing_null_empty_and_nonempty_bod
     monkeypatch.setitem(JOB_REGISTRY_BY_KEY, job_def.task_key, job_def)
 
     auth_headers = _auth_headers(client, account_user.username)
-    endpoint = f"/system/jobs/{job_def.task_key}/run"
+    endpoint = f"/system/jobs/{job_def.task_key}/runs"
 
     missing = client.post(endpoint, headers=auth_headers)
     assert missing.status_code == 202
@@ -93,7 +93,7 @@ def test_handler_only_job_rejects_missing_and_null_body(
     ).model_copy(update={"plugin_id": "demo_plugin"})
     monkeypatch.setitem(JOB_REGISTRY_BY_KEY, job_def.task_key, job_def)
     auth_headers = _auth_headers(client, account_user.username)
-    endpoint = f"/system/jobs/{job_def.task_key}/run"
+    endpoint = f"/system/jobs/{job_def.task_key}/runs"
 
     missing = client.post(endpoint, headers=auth_headers)
     explicit_null = client.post(
@@ -127,7 +127,7 @@ def test_builtin_jobs_accept_parameterless_async_trigger(client, account_user):
     for task_key in task_keys:
         job_def = JOB_REGISTRY_BY_KEY[task_key]
         assert job_def.params_schema is None
-        response = client.post(f"/system/jobs/{task_key}/run", headers=auth_headers)
+        response = client.post(f"/system/jobs/{task_key}/runs", headers=auth_headers)
         assert response.status_code == 202, response.text
         _release_task_run(BackgroundTaskRun.get_by_id(response.json()["task_run_id"]))
 

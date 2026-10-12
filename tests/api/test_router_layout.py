@@ -21,6 +21,7 @@ from src.api.routers.system import (
     auth,
     batch_operations,
     indexer_settings,
+    metadata_providers,
     plugins,
     status,
 )
@@ -43,6 +44,7 @@ from src.api.routers.videos import items as video_items
         (activity.router, (deps.db_deps, deps.get_current_user)),
         (batch_operations.router, (deps.db_deps, deps.get_current_user)),
         (indexer_settings.router, (deps.db_deps,)),
+        (metadata_providers.router, (deps.db_deps, deps.get_current_user)),
         (plugins.router, (deps.db_deps, deps.get_current_user)),
         (system_config.router, (deps.db_deps,)),
         (image_search.router, (deps.db_deps, deps.get_current_user)),
@@ -78,7 +80,7 @@ def test_create_app_registers_movie_subscription_routes():
     # 顶层资源而非 /movies 子路径：避免和 /movies/{movie_number} 抢匹配。
     assert "/movie-subscriptions" in paths
     assert "/movie-subscriptions/status-counts" in paths
-    assert "/movie-subscriptions/search-resets" in paths
+    assert "/movie-subscriptions/search/reset" in paths
     # 批量取消订阅刻意不在本域：复用已有的 /movies/unsubscriptions 与 DELETE /media/{id}。
     assert "/movie-subscriptions/removals" not in paths
 
@@ -92,7 +94,6 @@ def test_create_app_registers_videos_routes():
     assert "/video-collections" in paths
     assert "/video-collections/{collection_id}" in paths
     assert "/video-collections/{collection_id}/items" in paths
-    assert "/video-collections/{collection_id}/items/{item_id}" in paths
     assert "/video-collections/{collection_id}/items/reorder" in paths
     assert "/video-collections/{collection_id}/videos/{video_item_id}" in paths
     assert "/video-imports" not in paths
@@ -113,7 +114,7 @@ def test_create_app_registers_unified_media_import_routes():
     assert import_routes == {
         ("/imports", "POST"),
         ("/imports/{task_run_id}/failed-items", "GET"),
-        ("/imports/{task_run_id}/failed-items/{item_id}/search", "POST"),
+        ("/imports/{task_run_id}/failed-items/{item_id}/metadata-candidates", "GET"),
         ("/imports/{task_run_id}/failed-items/{item_id}/retry", "POST"),
     }
     assert ("/subtitle-imports", "POST") not in route_methods
@@ -182,7 +183,9 @@ def test_create_app_registers_image_search_routes():
     assert "/movies/{movie_number}/interaction-sync" not in paths
     assert "/movies/{movie_number}/heat-recompute" in paths
     assert "/movies/blacklist" in paths
-    assert "/movies/series/{series_id}/javdb/import/stream" in paths
+    assert "/movies/series/{series_id}/metadata-imports" in paths
+    assert "/movies/metadata-imports" in paths
+    assert "/actors/metadata-imports" in paths
     # 翻译链路已整体下线：设置探测端点一并移除。
     assert "/movie-desc-translation-settings/test" not in paths
     assert "/system/activity/bootstrap" in paths
@@ -192,7 +195,7 @@ def test_create_app_registers_image_search_routes():
     assert "/system/events/stream" not in paths
     assert "/status/insights" in paths
     assert "/status/watch-trend" in paths
-    assert "/status/metadata-providers/{provider}/test" in paths
+    assert "/metadata-providers/{provider}/test" in paths
     assert "/import-sources/browse" in paths
     assert "/imports" in paths
     assert not any(path.startswith("/import-jobs") for path in paths if path)
@@ -284,9 +287,40 @@ def test_create_app_does_not_register_removed_api_endpoints():
         # 缩略图不再保存可重置的资源状态。
         ("/system/resource-task-states/media_thumbnail_generation/reset", "POST"),
         ("/download-clients/{client_id}/sync", "POST"),
+        # 动作型/重复编址路径已按 docs/conventions.md「操作类端点」收敛。
+        ("/system/notifications/read", "POST"),
+        ("/system/notifications/read-all", "POST"),
+        ("/system/jobs/{task_key}/run", "POST"),
+        ("/movie-subscriptions/search-resets", "POST"),
+        ("/media/thumbnail-generation/reset", "POST"),
+        ("/movies/search/javdb/stream", "POST"),
+        ("/actors/search/javdb/stream", "POST"),
+        ("/movies/series/{series_id}/javdb/import/stream", "POST"),
+        ("/imports/{task_run_id}/failed-items/{item_id}/search", "POST"),
+        ("/media/{media_id}/points", "POST"),
+        ("/media/{media_id}/points/{point_id}", "DELETE"),
+        ("/video-collections/{collection_id}/items/{item_id}", "DELETE"),
+        ("/status/metadata-providers/{provider}/test", "GET"),
+        ("/indexer-settings/test", "GET"),
     }
 
     assert route_methods.isdisjoint(removed_routes)
+
+
+def test_create_app_registers_operation_endpoints():
+    route_methods = {
+        (getattr(route, "path", None), method)
+        for route in create_app().routes
+        for method in getattr(route, "methods", set())
+    }
+
+    assert ("/system/notifications", "PATCH") in route_methods
+    assert ("/system/jobs/{task_key}/runs", "POST") in route_methods
+    assert ("/movie-subscriptions/search/reset", "POST") in route_methods
+    assert ("/media/thumbnails/reset", "POST") in route_methods
+    assert ("/media-points", "POST") in route_methods
+    assert ("/indexer-settings/test", "POST") in route_methods
+    assert ("/metadata-providers/{provider}/test", "POST") in route_methods
 
 
 def test_create_app_registers_download_task_center_routes():

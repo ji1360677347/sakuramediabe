@@ -4,9 +4,9 @@ from src.api.routers.deps import db_deps, get_current_user
 from src.schema.common.pagination import PageResponse
 from src.schema.system.activity import (
     ActivityBootstrapResource,
-    NotificationBatchReadResponse,
-    NotificationReadBatchRequest,
     NotificationResource,
+    NotificationUpdateRequest,
+    NotificationUpdateResponse,
     TaskRunResource,
 )
 from src.service.system import ActivityService
@@ -49,20 +49,12 @@ def list_notifications(
     )
 
 
-@router.post(
-    "/system/notifications/read",
-    response_model=NotificationBatchReadResponse,
-)
-def mark_notifications_read(payload: NotificationReadBatchRequest):
-    return ActivityService.mark_notifications_read(payload.ids)
-
-
-@router.post(
-    "/system/notifications/read-all",
-    response_model=NotificationBatchReadResponse,
-)
-def mark_all_notifications_read():
-    return ActivityService.mark_all_notifications_read()
+@router.patch("/system/notifications", response_model=NotificationUpdateResponse)
+def update_notifications_read_state(payload: NotificationUpdateRequest):
+    return ActivityService.update_notifications_read_state(
+        ids=None if payload.all else payload.ids,
+        is_read=payload.is_read,
+    )
 
 
 @router.get("/system/task-runs/active", response_model=list[TaskRunResource])

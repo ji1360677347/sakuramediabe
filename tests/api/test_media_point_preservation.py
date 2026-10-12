@@ -65,10 +65,10 @@ def test_deleted_source_preserves_points_images_collections_and_clips(
         thumbnails.append(MediaThumbnail.create(media=media, image=image, offset=offset))
     point_ids = []
     for thumbnail in thumbnails[:2]:
-        response = client.post(f'/media/{media.id}/points', headers=headers, json={'thumbnail_id': thumbnail.id})
+        response = client.post('/media-points', headers=headers, json={'media_id': media.id, 'thumbnail_id': thumbnail.id})
         assert response.status_code == 201, response.text
         point_ids.append(response.json()['point_id'])
-    repeated = client.post(f'/media/{media.id}/points', headers=headers, json={'thumbnail_id': thumbnails[0].id})
+    repeated = client.post('/media-points', headers=headers, json={'media_id': media.id, 'thumbnail_id': thumbnails[0].id})
     assert repeated.status_code == 200 and repeated.json()['point_id'] == point_ids[0]
     detail_path = f'/movies/{media.movie_number}' if kind == 'jav' else f'/videos/{media.video_item_id}'
     detail = client.get(detail_path, headers=headers)

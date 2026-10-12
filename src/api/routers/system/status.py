@@ -1,12 +1,10 @@
 from fastapi import APIRouter, Depends, Query, status
 
-from src.api.exception.errors import ApiError
 from src.api.routers.deps import db_deps, get_current_user
 from src.schema.system.status import (
     ImageSearchResetResource,
     StatusImageSearchResource,
     StatusInsightsResource,
-    StatusMetadataProviderTestResource,
     StatusResource,
     StatusWatchTrendRange,
     StatusWatchTrendResource,
@@ -55,19 +53,3 @@ def get_image_search_status():
 )
 def reset_image_search():
     return ImageSearchResetService.reset()
-
-
-@router.get(
-    "/status/metadata-providers/{provider}/test",
-    response_model=StatusMetadataProviderTestResource,
-)
-def test_metadata_provider(provider: str):
-    normalized_provider = provider.strip().lower()
-    if normalized_provider not in {"javdb"}:
-        raise ApiError(
-            422,
-            "invalid_metadata_provider",
-            "Metadata provider must be javdb",
-            {"provider": provider},
-        )
-    return StatusService.test_metadata_provider(normalized_provider)

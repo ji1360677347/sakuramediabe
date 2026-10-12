@@ -75,6 +75,7 @@ class MediaPlaybackModeResource(SchemaModel):
 
 
 class MediaPointCreateRequest(SchemaModel):
+    media_id: int = Field(gt=0)
     thumbnail_id: int = Field(gt=0)
 
     @field_validator("thumbnail_id")

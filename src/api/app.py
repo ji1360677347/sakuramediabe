@@ -50,6 +50,9 @@ from src.api.routers.system.batch_operations import router as batch_operations_r
 from src.api.routers.system.config import router as config_router
 from src.api.routers.system.indexer_settings import router as indexer_settings_router
 from src.api.routers.system.jobs import router as jobs_router
+from src.api.routers.system.metadata_providers import (
+    router as metadata_providers_router,
+)
 from src.api.routers.system.plugins import router as plugins_router
 from src.api.routers.system.status import router as status_router
 from src.api.routers.transfers.downloads import router as downloads_router
@@ -123,6 +126,7 @@ def create_app() -> FastAPI:
     app.include_router(account_router)
     app.include_router(auth_router)
     app.include_router(indexer_settings_router)
+    app.include_router(metadata_providers_router)
     app.include_router(plugins_router)
 
     app.include_router(config_router)

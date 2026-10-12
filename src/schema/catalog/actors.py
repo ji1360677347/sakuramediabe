@@ -176,7 +176,7 @@ class YearResource(SchemaModel):
     movie_count: int
 
 
-class ActorJavdbSearchRequest(SchemaModel):
+class ActorMetadataImportRequest(SchemaModel):
     actor_name: str = Field(min_length=1)
 
     @field_validator("actor_name")

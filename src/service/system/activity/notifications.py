@@ -8,8 +8,8 @@ from src.model import BackgroundTaskRun, SystemNotification
 from src.model.base import get_database
 from src.schema.common.pagination import PageResponse
 from src.schema.system.activity import (
-    NotificationBatchReadResponse,
     NotificationResource,
+    NotificationUpdateResponse,
 )
 from src.service.system.activity.filters import (
     normalize_allowed_filter,
@@ -243,34 +243,21 @@ class NotificationService:
         )
 
     @classmethod
-    def mark_notifications_read(cls, ids: list[int]) -> NotificationBatchReadResponse:
+    def update_notifications_read_state(
+        cls, *, ids: list[int] | None, is_read: bool
+    ) -> NotificationUpdateResponse:
+        """批量设置已读状态；ids 为 None 表示全量。"""
         now = utc_now_for_db()
         with get_database().atomic():
-            updated_count = 0
-            if ids:
-                updated_count = (
-                    SystemNotification.update(is_read=True, read_at=now, updated_at=now)
-                    .where(
-                        SystemNotification.id.in_(ids),
-                        SystemNotification.is_read == False,
-                    )
-                    .execute()
-                )
+            query = SystemNotification.update(
+                is_read=is_read,
+                read_at=now if is_read else None,
+                updated_at=now,
+            ).where(SystemNotification.is_read != is_read)
+            if ids is not None:
+                query = query.where(SystemNotification.id.in_(ids))
+            updated_count = query.execute()
             unread_count = cls.get_unread_count()
-            return NotificationBatchReadResponse(
-                updated_count=updated_count, unread_count=unread_count
-            )
-
-    @classmethod
-    def mark_all_notifications_read(cls) -> NotificationBatchReadResponse:
-        now = utc_now_for_db()
-        with get_database().atomic():
-            updated_count = (
-                SystemNotification.update(is_read=True, read_at=now, updated_at=now)
-                .where(SystemNotification.is_read == False)
-                .execute()
-            )
-            unread_count = cls.get_unread_count()
-            return NotificationBatchReadResponse(
+            return NotificationUpdateResponse(
                 updated_count=updated_count, unread_count=unread_count
             )

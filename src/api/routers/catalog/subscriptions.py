@@ -46,7 +46,7 @@ def count_movie_subscriptions_by_status():
     return MovieSubscriptionService.count_by_status()
 
 
-@router.post("/search-resets", response_model=MovieSubscriptionSearchResetResponse)
+@router.post("/search/reset", response_model=MovieSubscriptionSearchResetResponse)
 def reset_movie_subscription_searches(
     payload: MovieSubscriptionSearchResetRequest | None = None,
 ):
@@ -59,4 +59,4 @@ def reset_movie_subscription_searches(
 
 # 批量取消订阅不在本域：不删文件走 POST /movies/unsubscriptions，要删媒体文件走
 # DELETE /media/{media_id}，两者都已存在，不在这里平行造一套。
-# 查询预算由本域维护；重开全部已放弃订阅可直接调用 POST /search-resets。
+# 查询预算由本域维护；重开全部已放弃订阅可直接调用 POST /search/reset。

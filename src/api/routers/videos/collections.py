@@ -69,12 +69,6 @@ def add_collection_item(collection_id: int, payload: VideoCollectionItemAddReque
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
-@router.delete("/{collection_id}/items/{item_id}", status_code=status.HTTP_204_NO_CONTENT)
-def remove_collection_item(collection_id: int, item_id: int):
-    VideoCollectionService.remove_item(collection_id, item_id)
-    return Response(status_code=status.HTTP_204_NO_CONTENT)
-
-
 @router.delete("/{collection_id}/videos/{video_item_id}", status_code=status.HTTP_204_NO_CONTENT)
 def remove_collection_video(collection_id: int, video_item_id: int):
     """按视频 id 移出合集；加入合集弹窗做勾选切换时用，无需成员行 id。幂等。"""

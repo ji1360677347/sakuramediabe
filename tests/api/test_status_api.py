@@ -46,17 +46,17 @@ def _create_movie(movie_number: str, javdb_id: str, **kwargs):
 
 
 @pytest.mark.parametrize(
-    "path",
+    ("method", "path"),
     [
-        "/status",
-        "/status/insights",
-        "/status/watch-trend",
-        "/status/image-search",
-        "/status/metadata-providers/javdb/test",
+        ("GET", "/status"),
+        ("GET", "/status/insights"),
+        ("GET", "/status/watch-trend"),
+        ("GET", "/status/image-search"),
+        ("POST", "/metadata-providers/javdb/test"),
     ],
 )
-def test_status_endpoints_require_authentication(client, path):
-    response = client.get(path)
+def test_status_endpoints_require_authentication(client, method, path):
+    response = getattr(client, method.lower())(path)
 
     assert response.status_code == 401
     assert response.json()["error"]["code"] == "unauthorized"
@@ -334,8 +334,8 @@ def test_metadata_provider_test_endpoint_returns_javdb_success_payload(
         lambda: _FakeJavdbProvider(),
     )
 
-    response = client.get(
-        "/status/metadata-providers/javdb/test",
+    response = client.post(
+        "/metadata-providers/javdb/test",
         headers={"Authorization": f"Bearer {token}"},
     )
 
@@ -368,8 +368,8 @@ def test_metadata_provider_test_endpoint_returns_request_failure_payload(
         lambda: _FailingProvider(),
     )
 
-    response = client.get(
-        "/status/metadata-providers/javdb/test",
+    response = client.post(
+        "/metadata-providers/javdb/test",
         headers={"Authorization": f"Bearer {token}"},
     )
 
@@ -399,8 +399,8 @@ def test_metadata_provider_test_endpoint_returns_not_found_failure_payload(
         lambda: _FailingProvider(),
     )
 
-    response = client.get(
-        "/status/metadata-providers/javdb/test",
+    response = client.post(
+        "/metadata-providers/javdb/test",
         headers={"Authorization": f"Bearer {token}"},
     )
 
@@ -416,8 +416,8 @@ def test_metadata_provider_test_endpoint_returns_not_found_failure_payload(
 def test_metadata_provider_test_endpoint_rejects_invalid_provider(client, account_user):
     token = _login(client, username=account_user.username)
 
-    response = client.get(
-        "/status/metadata-providers/unknown/test",
+    response = client.post(
+        "/metadata-providers/unknown/test",
         headers={"Authorization": f"Bearer {token}"},
     )
 

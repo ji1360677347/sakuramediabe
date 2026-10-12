@@ -58,7 +58,7 @@ def test_force_reset_deletes_existing_thumbnails(
     image_ids = [thumbnail.image_id for thumbnail in thumbnails]
 
     response = client.post(
-        "/media/thumbnail-generation/reset",
+        "/media/thumbnails/reset",
         json={"media_ids": [media.id], "force": True},
         headers=_auth_headers(client, account_user.username),
     )
@@ -79,8 +79,8 @@ def test_force_reset_keeps_moment_image(client, account_user, monkeypatch, tmp_p
     media, thumbnails, pack_path = _prepare_media_with_pack(monkeypatch, tmp_path)
     headers = _auth_headers(client, account_user.username)
     created = client.post(
-        f"/media/{media.id}/points",
-        json={"thumbnail_id": thumbnails[0].id},
+        "/media-points",
+        json={"media_id": media.id, "thumbnail_id": thumbnails[0].id},
         headers=headers,
     )
     assert created.status_code == 201, created.text
@@ -91,7 +91,7 @@ def test_force_reset_keeps_moment_image(client, account_user, monkeypatch, tmp_p
     assert point_file.read_bytes() == b"thumb-10"
 
     response = client.post(
-        "/media/thumbnail-generation/reset",
+        "/media/thumbnails/reset",
         json={"media_ids": [media.id], "force": True},
         headers=headers,
     )
@@ -113,7 +113,7 @@ def test_force_reset_skips_invalid_and_missing_media(
     media.save()
 
     response = client.post(
-        "/media/thumbnail-generation/reset",
+        "/media/thumbnails/reset",
         json={"media_ids": [media.id, 999999], "force": True},
         headers=_auth_headers(client, account_user.username),
     )

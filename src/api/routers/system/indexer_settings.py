@@ -28,6 +28,6 @@ def update_indexer_settings(
     return IndexerSettingsService.update_settings(payload)
 
 
-@router.get("/test", response_model=IndexerConnectionTestResponse)
+@router.post("/test", response_model=IndexerConnectionTestResponse)
 def test_indexer_connection(current_user=Depends(get_current_user)):
     return IndexerSettingsService.test_connection()

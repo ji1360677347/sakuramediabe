@@ -1,9 +1,15 @@
 from fastapi import APIRouter, Depends, Query, Response, status
+from fastapi.responses import JSONResponse
 
 from src.api.routers.deps import db_deps, get_current_user
 from src.schema.collections.moments import MomentCollectionSummary
 from src.schema.common.pagination import PageResponse
-from src.schema.playback.media import MediaPointKind, MediaPointListItemResource
+from src.schema.playback.media import (
+    MediaPointCreateRequest,
+    MediaPointKind,
+    MediaPointListItemResource,
+    MediaPointResource,
+)
 from src.service.collections import MomentCollectionService
 from src.service.playback import MediaService
 
@@ -39,6 +45,15 @@ def list_media_points(
         kind=kind,
         keyword=keyword,
         exclude_collection_id=exclude_collection_id,
+    )
+
+
+@router.post("/media-points", response_model=MediaPointResource)
+def create_media_point(payload: MediaPointCreateRequest, current_user=Depends(get_current_user)):
+    resource, created = MediaService.create_point(payload.media_id, payload)
+    return JSONResponse(
+        status_code=status.HTTP_201_CREATED if created else status.HTTP_200_OK,
+        content=resource.model_dump(mode="json"),
     )
 
 

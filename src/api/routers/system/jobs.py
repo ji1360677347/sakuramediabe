@@ -60,7 +60,7 @@ def list_jobs():
 
 
 @router.post(
-    "/system/jobs/{task_key}/run",
+    "/system/jobs/{task_key}/runs",
     response_model=ManualJobTriggerResponse,
     status_code=status.HTTP_202_ACCEPTED,
 )

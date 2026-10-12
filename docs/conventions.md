@@ -27,6 +27,15 @@
 - `PUT`: 幂等设置某个状态
 - `PATCH`: 局部更新资源
 - `DELETE`: 删除资源或解除资源关系
+- 幂等创建（get-or-create）：资源已存在时返回 `200` 与现有资源，新建返回 `201`
+
+## 操作类端点约定
+
+- 手动触发定时任务创建一次运行：`POST /system/jobs/{task_key}/runs`，返回运行资源标识
+- 重置类命令统一 `POST /<被重置状态>/reset`，请求体限定作用域，如 `POST /media/thumbnails/reset`、`POST /movie-subscriptions/search/reset`
+- 连接/配置探测统一 `POST /<资源>/test`，如 `POST /download-clients/test`、`POST /metadata-providers/{provider}/test`；探测有外部副作用与延迟，不使用 `GET`
+- 批量状态设置使用 `PATCH /<集合资源>`，请求体为 `{"ids": [...] 或 "all": true, ...被设置字段}`，如 `PATCH /system/notifications`
+- 外部元数据搜索并导入使用 `POST /<域>/metadata-imports`，响应为 SSE 事件流，外部来源由服务端解析，不写入路径
 
 ## 系统配置类资源约定
 

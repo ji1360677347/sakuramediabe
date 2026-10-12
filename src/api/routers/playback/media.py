@@ -5,7 +5,6 @@ from dataclasses import dataclass
 from typing import Literal
 
 from fastapi import APIRouter, Depends, Query, Request, Response, status
-from fastapi.responses import JSONResponse
 
 from src.api.exception.errors import ApiError
 from src.api.routers._utils import parse_csv_positive_ints, require_signed_params
@@ -30,7 +29,6 @@ from src.schema.playback.media import (
     InvalidMediaResource,
     MediaListItemResource,
     MediaPlaybackModeResource,
-    MediaPointCreateRequest,
     MediaPointKind,
     MediaPointResource,
     MediaProgressResource,
@@ -132,7 +130,7 @@ def list_media(
 
 
 @router.post(
-    "/thumbnail-generation/reset",
+    "/thumbnails/reset",
     response_model=MediaThumbnailResetResponse,
 )
 def reset_media_thumbnails(
@@ -224,29 +222,6 @@ def list_media_points_for_media(
     current_user=Depends(get_current_user),
 ):
     return MediaService.list_points(media_id)
-
-
-@router.post("/{media_id}/points", response_model=MediaPointResource)
-def create_media_point(
-    media_id: int,
-    payload: MediaPointCreateRequest,
-    current_user=Depends(get_current_user),
-):
-    resource, created = MediaService.create_point(media_id, payload)
-    return JSONResponse(
-        status_code=status.HTTP_201_CREATED if created else status.HTTP_200_OK,
-        content=resource.model_dump(mode="json"),
-    )
-
-
-@router.delete("/{media_id}/points/{point_id}", status_code=status.HTTP_204_NO_CONTENT)
-def delete_media_point(
-    media_id: int,
-    point_id: int,
-    current_user=Depends(get_current_user),
-):
-    MediaService.delete_point(media_id, point_id)
-    return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
 @router.get("/{media_id}/play/{resource_path:path}")

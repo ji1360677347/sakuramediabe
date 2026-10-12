@@ -16,10 +16,10 @@ from src.schema.catalog.movies import (
     MovieCollectionStatusResource,
     MovieCollectionType,
     MovieDetailResource,
-    MovieJavdbSearchRequest,
     MovieListItemResource,
     MovieListStatus,
     MovieMergedPlaybackResource,
+    MovieMetadataImportRequest,
     MovieNumberParseRequest,
     MovieNumberParseResponse,
     MovieNumberSource,
@@ -112,8 +112,8 @@ def list_movies_by_series(payload: MovieSeriesListRequest):
     )
 
 
-@router.post("/series/{series_id}/javdb/import/stream")
-def import_series_movies_from_javdb_stream(series_id: int):
+@router.post("/series/{series_id}/metadata-imports")
+def create_series_metadata_import(series_id: int):
     def stream():
         for event, event_payload in MovieMetadataRefreshService.stream_import_series_movies_from_javdb(series_id):
             yield to_sse_event(event, event_payload)
@@ -197,8 +197,8 @@ def list_similar_movies(
     )
 
 
-@router.post("/search/javdb/stream")
-def search_javdb_movies_stream(payload: MovieJavdbSearchRequest):
+@router.post("/metadata-imports")
+def create_movie_metadata_import(payload: MovieMetadataImportRequest):
     def stream():
         for event, event_payload in MovieMetadataRefreshService.stream_search_and_upsert_movie_from_javdb(
             payload.movie_number

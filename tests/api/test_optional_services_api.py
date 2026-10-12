@@ -23,7 +23,7 @@ def test_capability_endpoint_only_reads_configuration(client, account_user, monk
         assert status.json()['enabled'] is False
         assert client.post('/image-search/text-sessions', data={'text': 'test'}, headers=headers).status_code == 409
         assert client.post('/image-search/reset', headers=headers).status_code == 409
-        assert client.post('/system/jobs/image_search_index/run', headers=headers).status_code == 409
+        assert client.post('/system/jobs/image_search_index/runs', headers=headers).status_code == 409
     jobs = client.get('/system/jobs', headers=headers).json()
     job = next(item for item in jobs if item['task_key'] == 'image_search_index')
     assert job['manual_trigger_allowed'] is (qdrant and image)

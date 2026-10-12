@@ -71,7 +71,7 @@ def test_reset_media_thumbnail_terminal_state(client, account_user):
     )
 
     response = client.post(
-        "/media/thumbnail-generation/reset",
+        "/media/thumbnails/reset",
         json={"media_ids": [media.id]},
         headers=_auth_headers(client, account_user.username),
     )

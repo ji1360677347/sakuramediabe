@@ -184,7 +184,7 @@ class MovieNumberParseResponse(SchemaModel):
     reason: str | None = None
 
 
-class MovieJavdbSearchRequest(SchemaModel):
+class MovieMetadataImportRequest(SchemaModel):
     movie_number: str = Field(min_length=1)
 
     @field_validator("movie_number")

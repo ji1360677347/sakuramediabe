@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, status
+from fastapi import APIRouter, Depends, Query, status
 
 from src.api.routers.deps import db_deps, get_current_user
 from src.schema.transfers.media_import import (
@@ -7,7 +7,6 @@ from src.schema.transfers.media_import import (
     ImportBrowseResponse,
     ImportFailedItemResource,
     ImportFailedItemRetryRequest,
-    ImportMetadataSearchRequest,
     ImportMetadataSearchResponse,
     ImportRequest,
 )
@@ -42,19 +41,19 @@ def list_import_failed_items(task_run_id: int):
     return ImportTaskService.list_failed_items(task_run_id)
 
 
-@router.post(
-    "/imports/{task_run_id}/failed-items/{item_id}/search",
+@router.get(
+    "/imports/{task_run_id}/failed-items/{item_id}/metadata-candidates",
     response_model=ImportMetadataSearchResponse,
 )
-def search_import_failed_item(
+def list_import_metadata_candidates(
     task_run_id: int,
     item_id: str,
-    payload: ImportMetadataSearchRequest,
+    movie_number: str = Query(min_length=1, max_length=255),
 ):
     return ImportTaskService.search_failed_item(
         task_run_id,
         item_id,
-        payload.movie_number,
+        movie_number,
     )
 
 

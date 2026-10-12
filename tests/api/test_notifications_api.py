@@ -104,6 +104,55 @@ def test_list_notifications_rejects_unknown_category(client, account_user):
     assert response.json()["error"]["code"] == "invalid_activity_filter"
 
 
+def test_update_notifications_read_state_by_ids(client, account_user):
+    token = _login(client, account_user.username)
+    first = _create_notification("info", "n-first")
+    second = _create_notification("info", "n-second")
+
+    response = client.patch(
+        "/system/notifications",
+        json={"ids": [first.id], "is_read": True},
+        headers=_auth(token),
+    )
+
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["updated_count"] == 1
+    assert body["unread_count"] == 1
+    assert SystemNotification.get_by_id(first.id).is_read is True
+    assert SystemNotification.get_by_id(second.id).is_read is False
+
+
+def test_update_notifications_read_state_all(client, account_user):
+    token = _login(client, account_user.username)
+    _create_notification("info", "n-1")
+    _create_notification("info", "n-2")
+
+    response = client.patch(
+        "/system/notifications",
+        json={"all": True, "is_read": True},
+        headers=_auth(token),
+    )
+
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["updated_count"] == 2
+    assert body["unread_count"] == 0
+
+
+def test_update_notifications_read_state_rejects_ambiguous_target(client, account_user):
+    token = _login(client, account_user.username)
+
+    # ids 与 all 必须二选一：都不给、都给都拒绝。
+    for payload in ({"is_read": True}, {"ids": [1], "all": True, "is_read": True}):
+        response = client.patch(
+            "/system/notifications",
+            json=payload,
+            headers=_auth(token),
+        )
+        assert response.status_code == 422, response.text
+
+
 def test_activity_bootstrap_does_not_expose_event_cursor(client, account_user):
     token = _login(client, account_user.username)
     _create_notification("info", "bootstrap-notification")
