@@ -49,6 +49,7 @@ DETACH_USER_ASSET_IMAGES_MIGRATION_NAME = (
     "20261008_01_detach_media_point_and_video_cover_images"
 )
 VIEW_HISTORY_MIGRATION_NAME = "20261010_01_add_view_history"
+MEDIA_THUMBNAIL_ARCHIVE_MIGRATION_NAME = "20261014_01_add_media_thumbnail_archive"
 
 
 @dataclass(frozen=True)

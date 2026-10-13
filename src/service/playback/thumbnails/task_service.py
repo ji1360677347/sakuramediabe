@@ -27,6 +27,7 @@ from src.service.playback.operation_locks import (
     media_operation_lock,
 )
 from src.service.playback.provider_helpers import media_handle_for
+from src.service.playback.thumbnails.adoption import ThumbnailAdoptionService
 from src.service.playback.thumbnails.artifacts import ThumbnailArtifactService
 from src.service.playback.thumbnails.contracts import ThumbnailDeferred
 from src.service.playback.thumbnails.progress import ThumbnailTaskProgress
@@ -236,17 +237,21 @@ class MediaThumbnailTaskService:
         error_code: str | None,
         error_detail: str | None,
         terminal_at,
+        clear_adoption_block: bool = False,
     ) -> None:
-        Media.update(
-            thumbnail_generation_state=state,
-            thumbnail_attempt_count=attempt_count,
-            thumbnail_deferred_count=deferred_count,
-            thumbnail_next_retry_at=next_retry_at,
-            thumbnail_last_error_code=error_code,
-            thumbnail_last_error=error_detail,
-            thumbnail_terminal_at=terminal_at,
-            updated_at=utc_now_for_db(),
-        ).where(Media.id == media.id).execute()
+        updates = {
+            "thumbnail_generation_state": state,
+            "thumbnail_attempt_count": attempt_count,
+            "thumbnail_deferred_count": deferred_count,
+            "thumbnail_next_retry_at": next_retry_at,
+            "thumbnail_last_error_code": error_code,
+            "thumbnail_last_error": error_detail,
+            "thumbnail_terminal_at": terminal_at,
+            "updated_at": utc_now_for_db(),
+        }
+        if clear_adoption_block:
+            updates["thumbnail_adoption_blocked"] = False
+        Media.update(**updates).where(Media.id == media.id).execute()
 
     @classmethod
     def _mark_succeeded(cls, media: Media) -> None:
@@ -259,6 +264,7 @@ class MediaThumbnailTaskService:
             error_code=None,
             error_detail=None,
             terminal_at=None,
+            clear_adoption_block=True,
         )
 
     @classmethod
@@ -351,6 +357,14 @@ class MediaThumbnailTaskService:
             cls._mark_succeeded(media)
             return ThumbnailGenerationOutcome("skipped")
         try:
+            adopted_count = ThumbnailAdoptionService.adopt_for_media(media)
+        except Exception:
+            # 收养只是省一次远端生成，失败不能挡住真实生成。
+            adopted_count = 0
+            logger.exception("Media thumbnail adoption failed media_id={}", media_id)
+        if adopted_count:
+            return ThumbnailGenerationOutcome("adopted", generated_count=adopted_count)
+        try:
             generated_count = cls._generate_artifacts(media, progress_callback)
         except ThumbnailBackendUnavailable as exc:
             logger.warning(
@@ -420,6 +434,8 @@ class MediaThumbnailTaskService:
             "pending_media": len(entries),
             "successful_media": 0,
             "generated_thumbnails": 0,
+            "adopted_media": 0,
+            "adopted_thumbnails": 0,
             "deferred_media": 0,
             "retryable_failed_media": 0,
             "terminal_failed_media": 0,
@@ -441,6 +457,7 @@ class MediaThumbnailTaskService:
                     f"阶段 2/2 · 生成媒体缩略图 · {action}"
                     f" · 已处理 {completed}/{len(entries)} 部"
                     f" · 成功 {stats['successful_media']}"
+                    f" · 收养 {stats['adopted_media']}"
                     f" · 延后 {stats['deferred_media'] + stats['backend_deferred_media']}"
                     f" · 失败 {stats['retryable_failed_media'] + stats['terminal_failed_media']}"
                     f" · 跳过 {stats['skipped_media']}"
@@ -479,6 +496,9 @@ class MediaThumbnailTaskService:
             elif outcome.state == "succeeded":
                 stats["successful_media"] += 1
                 stats["generated_thumbnails"] += outcome.generated_count
+            elif outcome.state == "adopted":
+                stats["adopted_media"] += 1
+                stats["adopted_thumbnails"] += outcome.generated_count
             elif outcome.state == "deferred":
                 stats["deferred_media"] += 1
             elif outcome.state == "retryable_failed":

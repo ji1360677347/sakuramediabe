@@ -20,6 +20,7 @@ from src.model import (
     Image,
     MediaPoint,
     MediaThumbnail,
+    MediaThumbnailArchive,
     Movie,
     MoviePlotImage,
     VideoItem,
@@ -66,6 +67,11 @@ class ImageCleanupService:
                 and MoviePlotImage.select(MoviePlotImage.id).where(MoviePlotImage.image == image).exists(),
                 database.table_exists(MediaThumbnail._meta.table_name)
                 and MediaThumbnail.select(MediaThumbnail.id).where(MediaThumbnail.image == image).exists(),
+                # 归档缩略图仍要能读文件，按引用继续保活。
+                database.table_exists(MediaThumbnailArchive._meta.table_name)
+                and MediaThumbnailArchive.select(MediaThumbnailArchive.id)
+                .where(MediaThumbnailArchive.image == image)
+                .exists(),
                 database.table_exists(MediaPoint._meta.table_name)
                 and MediaPoint.select(MediaPoint.id).where(MediaPoint.image == image).exists(),
                 database.table_exists(VideoItem._meta.table_name)

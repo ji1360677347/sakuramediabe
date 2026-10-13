@@ -20,6 +20,10 @@ from src.service.catalog.metadata_source_service import MetadataSourceService
 from src.service.catalog.movie_asset_pack_backfill_service import (
     MovieAssetPackBackfillService,
 )
+from src.service.catalog.movie_cover_refresh_service import (
+    MovieCoverRefreshParams,
+    MovieCoverRefreshService,
+)
 from src.service.catalog.movie_javdb_backfill_service import MovieJavdbBackfillService
 from src.service.catalog.movie_subscription_search_state_service import (
     MovieSubscriptionSearchStateService,
@@ -181,6 +185,18 @@ BUILTIN_JOB_REGISTRY: list[JobDefinition] = [
         manual_only=True,
         handler=lambda reporter, _params: MovieAssetPackBackfillService.backfill(
             reporter=reporter,
+        ),
+    ),
+    JobDefinition(
+        task_key=MovieCoverRefreshService.TASK_KEY,
+        log_name="movie-cover-refresh",
+        cli_name="refresh-movie-covers",
+        cli_help="封面刷新回填（历史网页 CDN 带水印封面 → JavDB app CDN 干净原图）",
+        manual_only=True,
+        params_schema=MovieCoverRefreshParams,
+        handler=lambda reporter, params: MovieCoverRefreshService().run(
+            reporter=reporter,
+            params=MovieCoverRefreshParams.model_validate(params or {}),
         ),
     ),
     JobDefinition(

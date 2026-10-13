@@ -60,6 +60,8 @@ class Media(TimestampedMixin, BaseModel):
     thumbnail_last_error_code = peewee.CharField(max_length=64, null=True)
     thumbnail_last_error = peewee.TextField(null=True)
     thumbnail_terminal_at = peewee.DateTimeField(null=True)
+    # 强制重置换掉坏图后置真：跳过同 hash 收养，等一次真实生成成功后再恢复。
+    thumbnail_adoption_blocked = peewee.BooleanField(default=False)
 
     def save(self, *args, **kwargs):
         # 恰好其一不变量：一条 Media 必须归属 movie(JAV) 或 video_item(非 JAV) 之一，
@@ -94,6 +96,26 @@ class MediaThumbnail(TimestampedMixin, BaseModel):
             (("media", "offset"), True),
             (("image_search_index_status", "id"), False),
         )
+
+
+class MediaThumbnailArchive(TimestampedMixin, BaseModel):
+    """Media 删除后按文件指纹保留的缩略图产物，供同 hash 媒体再次入库时收养。
+
+    缩略图物理文件仍留在原 media 目录，靠这里的 Image 引用阻止清理；同一文件
+    被多份拷贝反复删除时 ``(file_hash, offset)`` 保证归档幂等。
+    """
+
+    file_hash = peewee.CharField(max_length=64, index=True)
+    image = peewee.ForeignKeyField(
+        Image,
+        backref="archived_media_thumbnails",
+        on_delete="RESTRICT",
+    )
+    offset = peewee.IntegerField(index=True)
+
+    class Meta:
+        table_name = "media_thumbnail_archive"
+        indexes = ((("file_hash", "offset"), True),)
 
 
 class MediaProgress(TimestampedMixin, BaseModel):

@@ -41,6 +41,7 @@ from src.start.migrations.runner import (
     MEDIA_IMPORT_SOURCE_IDENTITY_MIGRATION_NAME,
     MEDIA_POINT_PRESERVATION_MIGRATION_NAME,
     MEDIA_SPECIAL_TAGS_REMOVAL_MIGRATION_NAME,
+    MEDIA_THUMBNAIL_ARCHIVE_MIGRATION_NAME,
     MOMENT_COLLECTIONS_MIGRATION_NAME,
     MOVIE_BLACKLIST_MIGRATION_NAME,
     MOVIE_COLLECTION_OWNER_MIGRATION_NAME,
@@ -142,6 +143,7 @@ def test_current_migrations_are_discoverable_in_order():
         API_KEYS_MIGRATION_NAME,
         DETACH_USER_ASSET_IMAGES_MIGRATION_NAME,
         VIEW_HISTORY_MIGRATION_NAME,
+        MEDIA_THUMBNAIL_ARCHIVE_MIGRATION_NAME,
     ]
 
 
@@ -243,6 +245,7 @@ def test_run_pending_migrations_completes_fresh_current_schema_after_model_creat
         MigrationExecution(name=API_KEYS_MIGRATION_NAME, applied=True),
         MigrationExecution(name=DETACH_USER_ASSET_IMAGES_MIGRATION_NAME, applied=True),
         MigrationExecution(name=VIEW_HISTORY_MIGRATION_NAME, applied=True),
+        MigrationExecution(name=MEDIA_THUMBNAIL_ARCHIVE_MIGRATION_NAME, applied=True),
     ]
     assert _schema_migration_names(clean_db) == [
         CONSOLIDATED_MIGRATION_NAME,
@@ -273,6 +276,7 @@ def test_run_pending_migrations_completes_fresh_current_schema_after_model_creat
         API_KEYS_MIGRATION_NAME,
         DETACH_USER_ASSET_IMAGES_MIGRATION_NAME,
         VIEW_HISTORY_MIGRATION_NAME,
+        MEDIA_THUMBNAIL_ARCHIVE_MIGRATION_NAME,
     ]
 
 
@@ -553,7 +557,7 @@ def test_consolidated_migration_upgrades_v0421_schema_and_preserves_required_mem
         SchemaMigration.create(name=CONSOLIDATED_MIGRATION_NAME)
     summary = run_pending_migrations(clean_db)
 
-    assert summary.applied_count == 27
+    assert summary.applied_count == 28
     assert clean_db.execute_sql(
         "SELECT interaction_synced_at FROM movie WHERE id = %s", (movie.id,)
     ).fetchone()[0] == datetime(2026, 8, 20, 1, 2, 3)

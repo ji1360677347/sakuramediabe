@@ -53,6 +53,7 @@ from src.service.catalog.catalog_import_service import CatalogImportService
 from src.service.catalog.movie_image_service import ImageDownloadError
 from src.service.catalog.subtitle_asset_service import SubtitleAssetService
 from src.service.playback.provider_helpers import media_handle_for
+from src.service.playback.thumbnails.adoption import ThumbnailAdoptionService
 from src.service.transfers.downloads.common import library_handle_for
 from src.service.videos.video_cover_service import VideoCoverService
 
@@ -805,7 +806,15 @@ class MediaImportService:
                 raise ValueError("provider returned an invalid media file hash")
             media.file_hash = file_hash
             media.save(only=[Media.file_hash])
-            return media
+        try:
+            # 同文件已在别处导入过时直接收养既有缩略图，省一次远端抽帧。
+            # 收养只是优化：失败不能把已完成的媒体创建一起回滚。
+            ThumbnailAdoptionService.adopt_for_media(media)
+        except Exception:
+            logger.exception(
+                "Adopt imported media thumbnails failed media_id={}", media.id
+            )
+        return media
 
     @staticmethod
     def _generate_video_cover(*, storage: Any, video: VideoItem, media: Media) -> None:

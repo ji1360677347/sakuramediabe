@@ -47,6 +47,7 @@ from .playback import (
     MediaPoint,
     MediaProgress,
     MediaThumbnail,
+    MediaThumbnailArchive,
 )
 from .system import (
     ApiKey,
@@ -101,6 +102,7 @@ __all__ = [
     "MediaPoint",
     "MediaProgress",
     "MediaThumbnail",
+    "MediaThumbnailArchive",
     "MomentCollection",
     "MomentCollectionItem",
     "MomentRecommendation",

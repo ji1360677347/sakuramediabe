@@ -73,6 +73,7 @@ from src.service.playback.operation_locks import (
 )
 from src.service.playback.provider_helpers import media_handle_for
 from src.service.playback.search_filters import keyword_conditions
+from src.service.playback.thumbnails.adoption import ThumbnailAdoptionService
 from src.service.system.optional_services import image_search_enabled
 
 
@@ -643,32 +644,35 @@ class MediaService:
 
                 VideoItemService.delete_video(media.video_item_id)
                 return
-            media_handle = media_handle_for(media)
-            try:
-                storage = MEDIA_PROVIDER_REGISTRY.storage_for(media_handle.library)
-                storage.delete_media(media=media_handle)
-            except ProviderUnavailableError as exc:
-                raise ApiError(
-                    503,
-                    "provider_not_installed",
-                    "媒体提供方未安装",
-                ) from exc
-            except ProviderOperationError as exc:
-                if exc.code == "source_not_found":
-                    # Provider 已确认来源不存在，宿主记录已无对应远端对象，继续清理本地元数据。
-                    pass
-                else:
-                    status_code = {
-                        "authentication_failed": 401,
-                        "unavailable": 503,
-                        "invalid_config": 422,
-                        "unsupported": 422,
-                    }[exc.code]
+            # 已巡检确认远端无对象的媒体不再要求 provider 可达：插件缺失或鉴权失败时
+            # 也允许清理本地记录，否则死库记录永远删不掉。
+            if media.valid:
+                media_handle = media_handle_for(media)
+                try:
+                    storage = MEDIA_PROVIDER_REGISTRY.storage_for(media_handle.library)
+                    storage.delete_media(media=media_handle)
+                except ProviderUnavailableError as exc:
                     raise ApiError(
-                        status_code,
-                        f"provider_{exc.code}",
-                        exc.safe_message,
+                        503,
+                        "provider_not_installed",
+                        "媒体提供方未安装",
                     ) from exc
+                except ProviderOperationError as exc:
+                    if exc.code == "source_not_found":
+                        # Provider 已确认来源不存在，宿主记录已无对应远端对象，继续清理本地元数据。
+                        pass
+                    else:
+                        status_code = {
+                            "authentication_failed": 401,
+                            "unavailable": 503,
+                            "invalid_config": 422,
+                            "unsupported": 422,
+                        }[exc.code]
+                        raise ApiError(
+                            status_code,
+                            f"provider_{exc.code}",
+                            exc.safe_message,
+                        ) from exc
             thumbnails = list(
                 MediaThumbnail.select(MediaThumbnail, Image)
                 .join(Image)
@@ -677,6 +681,9 @@ class MediaService:
             thumbnail_image_ids = [thumbnail.image_id for thumbnail in thumbnails]
 
             with get_database().atomic():
+                # 缩略图先按文件指纹归档：归档行持有 Image 引用，随后的清理不会删除
+                # 记录与物理文件，同 hash 文件再次入库即可直接收养。
+                ThumbnailAdoptionService.archive_media_thumbnails(media)
                 # 清理播放进度和缩略图；时刻与切片仅置空来源引用。
                 Media.delete().where(Media.id == media.id).execute()
 
@@ -727,6 +734,8 @@ class MediaService:
                         thumbnail_last_error_code=None,
                         thumbnail_last_error=None,
                         thumbnail_terminal_at=None,
+                        # 显式重置要求真实重生成，本次不被同 hash 收养劫持。
+                        thumbnail_adoption_blocked=True,
                         updated_at=utc_now_for_db(),
                     ).where(Media.id == media.id).execute()
 

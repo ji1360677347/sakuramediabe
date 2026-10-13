@@ -122,16 +122,19 @@ class JavdbProvider(MetadataRequestClient):
             bool(username and password),
         )
 
-    def _normalize_image_url(self, url: str | None) -> str | None:
-        if not url:
-            return None
-        if "covers" in url:
-            return f"https://c0.jdbstatic.com/covers/{url.split('covers/')[-1]}"
-        if "samples" in url:
-            return f"https://c0.jdbstatic.com/samples/{url.split('samples/')[-1]}"
-        if "avatars" in url:
-            return f"https://c0.jdbstatic.com/avatars/{url.split('avatars/')[-1]}"
-        return url
+    @staticmethod
+    def _normalize_image_url(url: str | None) -> str | None:
+        """原样保留 app CDN 图片地址。
+
+        v4/v2 API 的 ``cover_url`` / ``samples`` / ``avatars`` 都指向 app CDN
+        （``tp.spfcas.com/<tenant>/...``），内容是干净原图，只是字节被单字节 XOR
+        混淆，由下载层 ``deobfuscate_image_bytes`` 统一还原。
+
+        历史实现把 host 改写成网页 CDN ``c0.jdbstatic.com`` 以绕开混淆，代价是
+        ``covers/`` 会拿到带 ``javdb.com`` 水印的版本（同一张图的另一份内容），
+        因此这里不再改写，换源等于换图。
+        """
+        return url or None
 
     def _build_api_url(
         self,

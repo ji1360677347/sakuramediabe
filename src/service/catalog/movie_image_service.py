@@ -28,6 +28,7 @@ from peewee import EXCLUDED
 from PIL import Image as PillowImage
 from PIL import UnidentifiedImageError
 
+from src.common.image_payload import deobfuscate_image_bytes
 from src.common.image_store import read_image_bytes
 from src.common.media_paths import (
     media_image_root_path,
@@ -352,6 +353,16 @@ class MovieImageService:
                 )
                 if thin_cover_task is not None:
                     return ThinCoverResolution(generated_task=thin_cover_task)
+        return self.resolve_thin_cover_from_plot_images(plot_links)
+
+    def resolve_thin_cover_from_plot_images(
+        self, plot_links: list[MoviePlotImage]
+    ) -> ThinCoverResolution:
+        """只按现有剧情图回退薄封面，不读封面文件。
+
+        供“封面换图后切不出书脊”的调用方使用：此时不能再读旧封面（可能正是被替换
+        掉的那张），只能按剧情图回退，否则会把已有薄封面清空。
+        """
         plot_items: list[tuple[int, bytes]] = []
         for plot_index, plot_link in enumerate(plot_links):
             try:
@@ -823,12 +834,15 @@ class MovieImageService:
                 if response.status_code != 200:
                     raise ImageDownloadError(f"unexpected_status_code:{response.status_code}")
 
-                target_path.write_bytes(response.content)
+                # JavDB app CDN 返回单字节 XOR 混淆字节，这里统一还原；
+                # 其余来源的明文图片原样返回。
+                content = deobfuscate_image_bytes(response.content)
+                target_path.write_bytes(content)
                 logger.debug(
                     "Import image download success url={} target={} size_bytes={} attempt={}",
                     image_url,
                     str(target_path),
-                    len(response.content),
+                    len(content),
                     attempt,
                 )
                 return
