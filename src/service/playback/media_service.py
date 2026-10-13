@@ -679,13 +679,29 @@ class MediaService:
                 .where(MediaThumbnail.media == media)
             )
             thumbnail_image_ids = [thumbnail.image_id for thumbnail in thumbnails]
+            replacement_movie_id = media.movie.id if media.movie_number else None
 
             with get_database().atomic():
                 # 缩略图先按文件指纹归档：归档行持有 Image 引用，随后的清理不会删除
                 # 记录与物理文件，同 hash 文件再次入库即可直接收养。
                 ThumbnailAdoptionService.archive_media_thumbnails(media)
+                if replacement_movie_id is not None:
+                    # 同一影片并发删除多个版本时，串行判定“是否已经删到最后一份”。
+                    Movie.select(Movie.id).where(Movie.id == replacement_movie_id).for_update().get()
                 # 清理播放进度和缩略图；时刻与切片仅置空来源引用。
                 Media.delete().where(Media.id == media.id).execute()
+                if replacement_movie_id is not None and not Media.select(Media.id).where(
+                    Media.movie == media.movie_number
+                ).exists():
+                    # JAV 的 Media 是订阅补库结果。最后一份删除后由 catalog 状态域开启新一轮搜索；
+                    # 未订阅影片会被更新条件过滤，非 JAV 媒体没有 movie_number，不会走到这里。
+                    from src.service.catalog.movie_subscription_search_state_service import (
+                        MovieSubscriptionSearchStateService,
+                    )
+
+                    MovieSubscriptionSearchStateService.reset(
+                        [replacement_movie_id], media_replacement=True
+                    )
 
                 obsolete_image_paths: set[str] = set()
                 for image_id in thumbnail_image_ids:

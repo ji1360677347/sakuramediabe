@@ -102,18 +102,23 @@ class MovieSubscriptionSearchStateService:
         return state
 
     @staticmethod
-    def reset(movie_ids: list[int] | None = None) -> int:
-        query = Movie.update(
-            subscription_search_state=STATE_PENDING,
-            subscription_search_attempt_count=0,
-            subscription_search_retry_round=Movie.subscription_search_retry_round + 1,
-            subscription_search_last_attempted_at=None,
-            subscription_search_last_succeeded_at=None,
-            subscription_search_next_retry_at=None,
-            subscription_search_error_code=None,
-            subscription_search_last_error=None,
-            subscription_search_last_error_at=None,
-        ).where(Movie.is_subscribed == True)
+    def reset(movie_ids: list[int] | None = None, *, media_replacement: bool = False) -> int:
+        """重开订阅搜索预算；``media_replacement`` 供删除最后一份 Media 的补库链路使用。"""
+        updates = {
+            "subscription_search_state": STATE_PENDING,
+            "subscription_search_attempt_count": 0,
+            "subscription_search_retry_round": Movie.subscription_search_retry_round + 1,
+            "subscription_search_last_attempted_at": None,
+            "subscription_search_last_succeeded_at": None,
+            "subscription_search_next_retry_at": None,
+            "subscription_search_error_code": None,
+            "subscription_search_last_error": None,
+            "subscription_search_last_error_at": None,
+        }
+        if media_replacement:
+            # 普通重开查询不动补库标记：已有的补库意图不能被一次手动重置抹掉。
+            updates["media_replacement_pending"] = True
+        query = Movie.update(**updates).where(Movie.is_subscribed == True)
         if movie_ids:
             query = query.where(Movie.id.in_(list(dict.fromkeys(movie_ids))))
         else:

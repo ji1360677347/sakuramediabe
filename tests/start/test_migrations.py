@@ -45,6 +45,7 @@ from src.start.migrations.runner import (
     MOMENT_COLLECTIONS_MIGRATION_NAME,
     MOVIE_BLACKLIST_MIGRATION_NAME,
     MOVIE_COLLECTION_OWNER_MIGRATION_NAME,
+    MOVIE_MEDIA_REPLACEMENT_MIGRATION_NAME,
     PLUGIN_COLLECTION_OWNERSHIP_MIGRATION_NAME,
     PLUGIN_MOVIE_METADATA_MIGRATION_NAME,
     REMOVE_GENERATED_THIN_COVER_MIGRATION_NAME,
@@ -144,6 +145,7 @@ def test_current_migrations_are_discoverable_in_order():
         DETACH_USER_ASSET_IMAGES_MIGRATION_NAME,
         VIEW_HISTORY_MIGRATION_NAME,
         MEDIA_THUMBNAIL_ARCHIVE_MIGRATION_NAME,
+        MOVIE_MEDIA_REPLACEMENT_MIGRATION_NAME,
     ]
 
 
@@ -246,6 +248,7 @@ def test_run_pending_migrations_completes_fresh_current_schema_after_model_creat
         MigrationExecution(name=DETACH_USER_ASSET_IMAGES_MIGRATION_NAME, applied=True),
         MigrationExecution(name=VIEW_HISTORY_MIGRATION_NAME, applied=True),
         MigrationExecution(name=MEDIA_THUMBNAIL_ARCHIVE_MIGRATION_NAME, applied=True),
+        MigrationExecution(name=MOVIE_MEDIA_REPLACEMENT_MIGRATION_NAME, applied=True),
     ]
     assert _schema_migration_names(clean_db) == [
         CONSOLIDATED_MIGRATION_NAME,
@@ -277,6 +280,7 @@ def test_run_pending_migrations_completes_fresh_current_schema_after_model_creat
         DETACH_USER_ASSET_IMAGES_MIGRATION_NAME,
         VIEW_HISTORY_MIGRATION_NAME,
         MEDIA_THUMBNAIL_ARCHIVE_MIGRATION_NAME,
+        MOVIE_MEDIA_REPLACEMENT_MIGRATION_NAME,
     ]
 
 
@@ -319,6 +323,28 @@ def test_download_task_remote_seen_migration_backfills_existing_rows(clean_db):
     ).execute()
     migration.migrate(clean_db)
     assert DownloadTask.get_by_id(task.id).remote_seen_at == sentinel
+
+
+def test_movie_media_replacement_migration_adds_false_default(clean_db):
+    clean_db.bind(TEST_MODELS, bind_refs=False, bind_backrefs=False)
+    clean_db.create_tables(TEST_MODELS)
+    movie = Movie.create(
+        movie_number="REPLACE-MIGRATION-001",
+        javdb_id="replace-migration-001",
+        title="replacement migration",
+    )
+    _drop_columns(clean_db, "movie", ("media_replacement_pending",))
+
+    migration = _load_migration_module(
+        Path(f"{MOVIE_MEDIA_REPLACEMENT_MIGRATION_NAME}.py")
+    )
+    migration.migrate(clean_db)
+
+    assert "media_replacement_pending" in _column_names(clean_db, "movie")
+    assert Movie.get_by_id(movie.id).media_replacement_pending is False
+
+    migration.migrate(clean_db)
+    assert Movie.get_by_id(movie.id).media_replacement_pending is False
 
 
 def test_download_submission_indexes_migration_adds_query_indexes(clean_db):
@@ -557,7 +583,7 @@ def test_consolidated_migration_upgrades_v0421_schema_and_preserves_required_mem
         SchemaMigration.create(name=CONSOLIDATED_MIGRATION_NAME)
     summary = run_pending_migrations(clean_db)
 
-    assert summary.applied_count == 28
+    assert summary.applied_count == 29
     assert clean_db.execute_sql(
         "SELECT interaction_synced_at FROM movie WHERE id = %s", (movie.id,)
     ).fetchone()[0] == datetime(2026, 8, 20, 1, 2, 3)

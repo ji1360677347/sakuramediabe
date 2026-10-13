@@ -4,7 +4,7 @@ from unittest.mock import Mock
 import pytest
 
 from src.api.exception.errors import ApiError
-from src.model import Movie
+from src.model import DownloadClient, DownloadTask, MediaLibrary, Movie
 from src.service.catalog.movie_subscription_search_state_service import (
     MovieSubscriptionSearchStateService,
 )
@@ -15,10 +15,14 @@ from src.service.transfers.downloads.auto_subscribed.auto_download_service impor
 )
 
 
-def _candidate(*, title: str, source_uri: str):
+def _candidate(*, title: str, source_uri: str, client_ids: tuple[int, ...] = (1,)):
     return SimpleNamespace(
         source_uri=source_uri,
-        resolved_client_id=1,
+        resolved_client_id=client_ids[0],
+        download_clients=[
+            SimpleNamespace(id=client_id, name=f"client-{client_id}")
+            for client_id in client_ids
+        ],
         indexer_name="indexer",
         title=title,
         size_bytes=MIN_SIZE_BYTES,
@@ -26,7 +30,14 @@ def _candidate(*, title: str, source_uri: str):
     )
 
 
-def _build_service(monkeypatch, *, candidates, response=None, error=None):
+def _build_service(
+    monkeypatch,
+    *,
+    candidates,
+    response=None,
+    error=None,
+    media_replacement_pending: bool = False,
+):
     search_service = SimpleNamespace(search_candidates=Mock(return_value=candidates))
     request_service = SimpleNamespace(create_request=Mock())
     if error is not None:
@@ -37,7 +48,11 @@ def _build_service(monkeypatch, *, candidates, response=None, error=None):
         download_search_service=search_service,
         download_request_service=request_service,
     )
-    movie = SimpleNamespace(id=1, movie_number="ABC-001")
+    movie = SimpleNamespace(
+        id=1,
+        movie_number="ABC-001",
+        media_replacement_pending=media_replacement_pending,
+    )
     monkeypatch.setattr(service, "_select_candidate_ids", Mock(return_value=[movie.id]))
     monkeypatch.setattr(
         MovieSubscriptionSearchStateService,
@@ -134,6 +149,192 @@ def test_auto_download_tries_next_candidate_after_blacklist_rejection(monkeypatc
     assert summary["failed_items"] == []
     assert request_service.create_request.call_count == 2
     assert request_service.create_request.call_args_list[-1].args[0].candidate.source_uri == "magnet:?xt=second"
+
+
+def test_auto_download_rolls_over_to_next_bound_client(monkeypatch):
+    response = SimpleNamespace(created=True)
+    service, request_service = _build_service(
+        monkeypatch,
+        candidates=[_candidate(title="resource", source_uri="magnet:?xt=first", client_ids=(1, 2))],
+        response=response,
+    )
+    request_service.create_request.side_effect = [
+        ApiError(503, "provider_unavailable", "A unavailable"),
+        response,
+    ]
+
+    summary = service.run(reporter=SimpleNamespace(emit=Mock()))
+
+    assert summary["submitted_movies"] == 1
+    assert [
+        call.args[0].client_id for call in request_service.create_request.call_args_list
+    ] == [1, 2]
+
+
+def test_auto_download_does_not_roll_over_after_client_accepts(monkeypatch):
+    response = SimpleNamespace(created=True)
+    service, request_service = _build_service(
+        monkeypatch,
+        candidates=[_candidate(title="resource", source_uri="magnet:?xt=first", client_ids=(1, 2))],
+        response=response,
+    )
+
+    summary = service.run(reporter=SimpleNamespace(emit=Mock()))
+
+    assert summary["submitted_movies"] == 1
+    request_service.create_request.assert_called_once()
+    assert request_service.create_request.call_args.args[0].client_id == 1
+
+
+def test_auto_download_global_blacklist_skips_other_clients_for_same_candidate(monkeypatch):
+    response = SimpleNamespace(created=True)
+    service, request_service = _build_service(
+        monkeypatch,
+        candidates=[
+            _candidate(title="first", source_uri="magnet:?xt=first", client_ids=(1, 2)),
+            _candidate(title="second", source_uri="magnet:?xt=second", client_ids=(3,)),
+        ],
+        response=response,
+    )
+    request_service.create_request.side_effect = [
+        ApiError(422, "download_source_blacklisted", "blacklisted"),
+        response,
+    ]
+
+    summary = service.run(reporter=SimpleNamespace(emit=Mock()))
+
+    assert summary["submitted_movies"] == 1
+    assert [
+        call.args[0].client_id for call in request_service.create_request.call_args_list
+    ] == [1, 3]
+
+
+def test_auto_download_replacement_skips_reused_task_and_tries_next_candidate(monkeypatch):
+    service, request_service = _build_service(
+        monkeypatch,
+        candidates=[
+            _candidate(title="first", source_uri="magnet:?xt=first"),
+            _candidate(title="second", source_uri="magnet:?xt=second"),
+        ],
+        media_replacement_pending=True,
+    )
+    # 复用已有远端任务不会重新下载也不会重跑导入，补库必须换下一个候选。
+    request_service.create_request.side_effect = [
+        SimpleNamespace(created=False),
+        SimpleNamespace(created=True),
+    ]
+
+    summary = service.run(reporter=SimpleNamespace(emit=Mock()))
+
+    assert summary["submitted_movies"] == 1
+    assert [
+        call.args[0].candidate.source_uri
+        for call in request_service.create_request.call_args_list
+    ] == ["magnet:?xt=first", "magnet:?xt=second"]
+
+
+def test_auto_download_keeps_reused_task_as_skipped_without_replacement(monkeypatch):
+    service, request_service = _build_service(
+        monkeypatch,
+        candidates=[
+            _candidate(title="first", source_uri="magnet:?xt=first"),
+            _candidate(title="second", source_uri="magnet:?xt=second"),
+        ],
+        response=SimpleNamespace(created=False),
+    )
+
+    summary = service.run(reporter=SimpleNamespace(emit=Mock()))
+
+    assert summary["submitted_movies"] == 0
+    assert summary["skipped_movies"] == 1
+    request_service.create_request.assert_called_once()
+    assert request_service.create_request.call_args.args[0].candidate.source_uri == "magnet:?xt=first"
+
+
+def _task_for_selector(movie: Movie, *, state: str, import_status: str) -> DownloadTask:
+    library = MediaLibrary.create(
+        name=f"library-{movie.id}",
+        provider_key="test",
+        provider_config={},
+    )
+    client = DownloadClient.create(
+        name=f"client-{movie.id}",
+        library=library,
+        provider_config={},
+    )
+    return DownloadTask.create(
+        client=client,
+        movie=movie.movie_number,
+        remote_id=f"remote-{movie.id}",
+        name=movie.movie_number,
+        state=state,
+        progress=1,
+        import_status=import_status,
+    )
+
+
+def test_auto_selector_allows_replacement_with_completed_history(test_db):
+    movie = Movie.create(
+        movie_number="REPLACE-001",
+        javdb_id="replace-001",
+        title="replace",
+        is_subscribed=True,
+        media_replacement_pending=True,
+    )
+    _task_for_selector(movie, state="completed", import_status="completed")
+
+    assert SubscribedMovieAutoDownloadService._select_candidate_ids() == [movie.id]
+
+
+def test_auto_selector_keeps_zero_output_import_blocked_without_replacement(test_db):
+    movie = Movie.create(
+        movie_number="REPLACE-002",
+        javdb_id="replace-002",
+        title="zero output",
+        is_subscribed=True,
+    )
+    _task_for_selector(movie, state="completed", import_status="completed")
+
+    assert SubscribedMovieAutoDownloadService._select_candidate_ids() == []
+
+
+def test_auto_selector_keeps_active_task_blocked_during_replacement(test_db):
+    movie = Movie.create(
+        movie_number="REPLACE-003",
+        javdb_id="replace-003",
+        title="active",
+        is_subscribed=True,
+        media_replacement_pending=True,
+    )
+    _task_for_selector(movie, state="downloading", import_status="pending")
+
+    assert SubscribedMovieAutoDownloadService._select_candidate_ids() == []
+
+
+def test_auto_selector_keeps_unfinished_import_blocked_during_replacement(test_db):
+    movie = Movie.create(
+        movie_number="REPLACE-004",
+        javdb_id="replace-004",
+        title="unfinished import",
+        is_subscribed=True,
+        media_replacement_pending=True,
+    )
+    _task_for_selector(movie, state="completed", import_status="running")
+
+    assert SubscribedMovieAutoDownloadService._select_candidate_ids() == []
+
+
+def test_auto_selector_allows_retry_after_failed_download(test_db):
+    movie = Movie.create(
+        movie_number="RETRY-001",
+        javdb_id="retry-001",
+        title="failed download",
+        is_subscribed=True,
+    )
+    # 下载失败的任务仍带着初始的 import_status=pending，不能当成"导入在途"挡住下一轮搜索。
+    _task_for_selector(movie, state="failed", import_status="pending")
+
+    assert SubscribedMovieAutoDownloadService._select_candidate_ids() == [movie.id]
 
 
 def test_auto_download_exhausts_old_movie_after_configured_no_candidate_budget(

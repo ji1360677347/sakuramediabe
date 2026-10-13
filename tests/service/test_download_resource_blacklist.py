@@ -14,6 +14,7 @@ from src.model import (
     DownloadSubmissionRecord,
     DownloadTask,
     MediaLibrary,
+    Movie,
 )
 from src.plugins.provider_protocol import ProviderOperationError, RemoteDownloadTask
 from src.schema.transfers.downloads import DownloadRequestCreateRequest
@@ -352,6 +353,62 @@ def test_submission_failure_is_recorded(downloads):
     assert record.task_id is None
     assert not DownloadTask.select().exists()
     assert not DownloadResourceBlacklist.select().exists()
+
+
+def test_successful_submission_clears_media_replacement_pending(downloads):
+    Movie.create(
+        movie_number="TEST-001",
+        javdb_id="replacement-success",
+        title="replacement",
+        is_subscribed=True,
+        media_replacement_pending=True,
+    )
+
+    DownloadRequestService().create_request(_payload())
+
+    assert Movie.get(Movie.movie_number == "TEST-001").media_replacement_pending is False
+
+
+def test_failed_submission_keeps_media_replacement_pending(downloads):
+    _client, provider = downloads
+    movie = Movie.create(
+        movie_number="TEST-001",
+        javdb_id="replacement-failure",
+        title="replacement",
+        is_subscribed=True,
+        media_replacement_pending=True,
+    )
+    provider.submit.side_effect = ProviderOperationError(
+        provider_key="local",
+        operation="submit",
+        code="unavailable",
+        safe_message="不可用",
+        retryable=True,
+    )
+
+    with pytest.raises(ApiError):
+        DownloadRequestService().create_request(_payload())
+
+    assert Movie.get_by_id(movie.id).media_replacement_pending is True
+
+
+def test_reused_submission_keeps_media_replacement_pending(downloads):
+    movie = Movie.create(
+        movie_number="TEST-001",
+        javdb_id="replacement-reuse",
+        title="replacement",
+        is_subscribed=True,
+        media_replacement_pending=True,
+    )
+    service = DownloadRequestService()
+    service.create_request(_payload())
+    # 复用已有远端任务既不会重新下载也不会重跑导入，补库标记必须留着。
+    Movie.update(media_replacement_pending=True).where(Movie.id == movie.id).execute()
+
+    reused = service.create_request(_payload())
+
+    assert reused.created is False
+    assert Movie.get_by_id(movie.id).media_replacement_pending is True
 
 
 def test_unparseable_source_never_reaches_provider(downloads):

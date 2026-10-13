@@ -3,7 +3,12 @@
 from __future__ import annotations
 
 from src.api.exception.errors import ApiError
-from src.model import DownloadResourceBlacklist, DownloadSubmissionRecord, DownloadTask
+from src.model import (
+    DownloadResourceBlacklist,
+    DownloadSubmissionRecord,
+    DownloadTask,
+    Movie,
+)
 from src.model.base import get_database
 from src.plugins.provider_protocol import DownloadSubmission, ProviderOperationError
 from src.schema.transfers.downloads import (
@@ -105,6 +110,13 @@ class DownloadRequestService:
                 )
             record.task_id = task.id
             record.save(only=[DownloadSubmissionRecord.task_id])
+            if created:
+                # 只有真正新建远端任务才算补库请求被受理；复用已有任务既不会重新下载，
+                # 也不会重跑导入，标记留着让调度换下一个候选。
+                Movie.update(media_replacement_pending=False).where(
+                    Movie.movie_number == movie_number,
+                    Movie.media_replacement_pending == True,
+                ).execute()
         return DownloadRequestCreateResponse(
             task=DownloadTaskResource.from_model(task),
             created=created,

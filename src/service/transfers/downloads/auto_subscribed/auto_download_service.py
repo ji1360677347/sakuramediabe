@@ -18,11 +18,16 @@ from src.service.catalog.movie_subscription_search_state_service import (
 )
 from src.service.transfers.downloads.request_service import DownloadRequestService
 from src.service.transfers.downloads.search_service import DownloadSearchService
+from src.service.transfers.shared.common import (
+    unfinished_import_download_task_exists_expression,
+)
 
 MIN_SIZE_BYTES = 1 * 1024 * 1024 * 1024
 MAX_SIZE_BYTES = 40 * 1024 * 1024 * 1024
 MAX_REJECTED_CANDIDATES = 5
 TASK_KEY = "subscribed_movie_auto_download"
+CLIENT_ROLLOVER_STATUS_CODES = frozenset({401, 404, 422, 503})
+BLACKLISTED_CANDIDATE_CODE = "download_source_blacklisted"
 
 
 class SubscribedMovieAutoDownloadService:
@@ -61,34 +66,61 @@ class SubscribedMovieAutoDownloadService:
         candidates.sort(key=lambda candidate: (-candidate.size_bytes, candidate.indexer_name, candidate.title))
         response = None
         for candidate in candidates[:MAX_REJECTED_CANDIDATES]:
-            try:
-                response = self.download_request_service.create_request(
-                    DownloadRequestCreateRequest(
-                        client_id=candidate.resolved_client_id,
-                        movie_number=movie_number,
-                        candidate={
-                            "source_uri": candidate.source_uri,
-                            "indexer_name": candidate.indexer_name,
-                            "title": candidate.title,
-                            "size_bytes": candidate.size_bytes,
-                            "seeders": candidate.seeders,
-                        },
+            for client_id in self._candidate_client_ids(candidate):
+                try:
+                    response = self.download_request_service.create_request(
+                        DownloadRequestCreateRequest(
+                            client_id=client_id,
+                            movie_number=movie_number,
+                            candidate={
+                                "source_uri": candidate.source_uri,
+                                "indexer_name": candidate.indexer_name,
+                                "title": candidate.title,
+                                "size_bytes": candidate.size_bytes,
+                                "seeders": candidate.seeders,
+                            },
+                        )
                     )
-                )
-                break
-            except ApiError as exc:
-                if exc.status_code in {404, 422, 503}:
+                except ApiError as exc:
+                    if exc.code == BLACKLISTED_CANDIDATE_CODE:
+                        logger.info(
+                            "Auto download candidate rejected movie_number={} title={} code={}",
+                            movie_number,
+                            candidate.title,
+                            exc.code,
+                        )
+                        break
+                    if exc.status_code in CLIENT_ROLLOVER_STATUS_CODES:
+                        logger.info(
+                            "Auto download client rejected movie_number={} client_id={} "
+                            "title={} code={}",
+                            movie_number,
+                            client_id,
+                            candidate.title,
+                            exc.code,
+                        )
+                        continue
+                    shared["failed_items"].append(
+                        {"movie_number": movie_number, "stage": "submit", "detail": str(exc)}
+                    )
+                    raise SubscriptionSearchError(
+                        "download_submit_failed", str(exc), consumes_budget=False
+                    ) from exc
+                if movie.media_replacement_pending and not response.created:
+                    # 补库时复用已有远端任务不会重新下载、也不会重跑导入，本轮拿不到媒体；
+                    # 该候选在本客户端不可用，换下一个候选。
                     logger.info(
-                        "Auto download candidate rejected movie_number={} title={} code={}",
+                        "Auto download replacement candidate already exists "
+                        "movie_number={} client_id={} title={}",
                         movie_number,
+                        client_id,
                         candidate.title,
-                        exc.code,
                     )
-                    continue
-                shared["failed_items"].append(
-                    {"movie_number": movie_number, "stage": "submit", "detail": str(exc)}
-                )
-                raise SubscriptionSearchError("download_submit_failed", str(exc), consumes_budget=False) from exc
+                    response = None
+                    break
+                break
+            if response is not None:
+                break
         if response is None:
             shared["no_candidate_movies"] += 1
             shared["no_candidate_movie_numbers"].append(movie_number)
@@ -110,6 +142,16 @@ class SubscribedMovieAutoDownloadService:
             and MIN_SIZE_BYTES <= candidate.size_bytes <= MAX_SIZE_BYTES
             and candidate.seeders > 0
         )
+
+    @staticmethod
+    def _candidate_client_ids(candidate) -> list[int]:
+        """按绑定顺序尝试候选的全部下载器，默认下载器始终排第一。"""
+        client_ids = [int(candidate.resolved_client_id)]
+        for client in getattr(candidate, "download_clients", ()) or ():
+            client_id = int(client.id)
+            if client_id not in client_ids:
+                client_ids.append(client_id)
+        return client_ids
 
     def run(self, *, reporter) -> dict[str, Any]:
         candidate_ids = self._select_candidate_ids()
@@ -210,19 +252,24 @@ class SubscribedMovieAutoDownloadService:
     def _select_candidate_ids() -> list[int]:
         from src.common.runtime_time import utc_now_for_db
 
+        movie_match = DownloadTask.movie == Movie.movie_number
+        ongoing_tasks = DownloadTask.select(DownloadTask.id).where(
+            movie_match & DownloadTask.state.in_(("queued", "downloading"))
+        )
+        completed_tasks = DownloadTask.select(DownloadTask.id).where(
+            movie_match & (DownloadTask.state == "completed")
+        )
         query = (
             Movie.select(Movie.id)
             .where(Movie.is_subscribed == True)
             .where(~media_exists_expression())
+            .where(~fn.EXISTS(ongoing_tasks))
+            # 与订阅状态展示共用同一口径：只在途任务（含下完等导入）算"进行中"，
+            # 下载失败的终态行不挡下一轮搜索。
+            .where(~unfinished_import_download_task_exists_expression())
             .where(
-                ~fn.EXISTS(
-                    DownloadTask.select(DownloadTask.id).where(
-                        (DownloadTask.movie == Movie.movie_number)
-                        & DownloadTask.state.in_(
-                            ("queued", "downloading", "completed")
-                        )
-                    )
-                )
+                (Movie.media_replacement_pending == True)
+                | ~fn.EXISTS(completed_tasks)
             )
             .where(MovieSubscriptionSearchStateService.candidate_condition(now=utc_now_for_db()))
             .order_by(Movie.subscribed_at.asc(), Movie.id.asc())

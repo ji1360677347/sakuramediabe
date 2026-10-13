@@ -89,6 +89,9 @@ class Movie(TimestampedMixin, BaseModel):
     is_collection = peewee.BooleanField(null=False, default=False, index=True)
     is_subscribed = peewee.BooleanField(null=False, default=False, index=True)
     is_blacklisted = peewee.BooleanField(null=False, default=False, index=True)
+    # 用户删除订阅影片最后一份 Media 后置真，直到新一轮下载请求成功受理。
+    # 它用于区分“曾入库后媒体被删”和“导入失败且从未产出媒体”两类零 Media 状态。
+    media_replacement_pending = peewee.BooleanField(null=False, default=False)
     subscribed_at = peewee.DateTimeField(null=True, index=True)
     # 订阅资源查询是影片领域状态：保留可见进度与重试预算，不再依赖通用资源任务台账。
     subscription_search_state = peewee.CharField(
