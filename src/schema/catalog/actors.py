@@ -4,6 +4,7 @@ from enum import Enum
 from pydantic import Field, field_validator, model_validator
 
 from src.common import build_signed_image_url
+from src.model.catalog.actors import ACTOR_IMAGE_FIELDS
 from src.schema.common.base import SchemaModel
 
 
@@ -91,8 +92,12 @@ def _actor_resource_payload(actor) -> dict:
         "display_name_override": actor.display_name_override,
         "has_profile_image_override": actor.has_profile_image_override,
         "mutation_revision": actor.mutation_revision,
+        # 头像覆盖的 owner 不进 manual_fields：图片状态由 has_profile_image_override 表达，
+        # 这里只报人工锁定过的资料字段。
         "manual_fields": sorted(
-            name for name, owner in field_owners.items() if owner == "host:manual"
+            name
+            for name, owner in field_owners.items()
+            if owner == "host:manual" and name not in ACTOR_IMAGE_FIELDS
         ),
     }
 

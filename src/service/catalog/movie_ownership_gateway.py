@@ -18,7 +18,13 @@ from __future__ import annotations
 import json
 from typing import Any
 
-from src.model.catalog.movies import MOVIE_FIELD_CODECS, PROTECTED_MOVIE_FIELDS, Movie
+from src.model.catalog.movies import (
+    MOVIE_FIELD_CODECS,
+    MOVIE_IMAGE_FIELDS,
+    MOVIE_OWNER_TRACKED_FIELDS,
+    PROTECTED_MOVIE_FIELDS,
+    Movie,
+)
 
 MANUAL_MOVIE_FIELD_OWNER = "host:manual"
 
@@ -195,9 +201,9 @@ class MovieOwnershipGateway:
         owner = cls._owner_key(plugin_id)
         table = Movie._meta.table_name
         if fields is not None:
-            invalid = set(fields) - set(PROTECTED_MOVIE_FIELDS)
+            invalid = set(fields) - set(MOVIE_OWNER_TRACKED_FIELDS)
             if invalid:
-                raise ValueError(f"非受保护字段: {sorted(invalid)}")
+                raise ValueError(f"非受保护字段或图片: {sorted(invalid)}")
             if not fields:
                 raise ValueError("fields 不能为空")
             # 按 owner 过滤重建映射，只摘除属于目标插件的 key：jsonb_each_text 逐
@@ -238,3 +244,89 @@ class MovieOwnershipGateway:
             (owner, owner),
         )
         return cursor.rowcount
+
+    @classmethod
+    def _take_image_owner(
+        cls,
+        movie_id: int,
+        plugin_id: str,
+        field: str,
+        expected_revision: int,
+        *,
+        image_id: int | None = None,
+    ) -> bool:
+        """接管图片槽位并可选换引用：槽位无主或已属于本插件、且版本一致才生效。
+
+        任一条件不满足时整次零修改（含 ``image_id``）；``field`` 只允许图片字段，
+        它会被拼进 SQL，不能接受调用方传入的自由字符串。
+        """
+        if field not in MOVIE_IMAGE_FIELDS:
+            raise ValueError(f"非图片字段: {field}")
+        if type(expected_revision) is not int or expected_revision < 0:
+            raise ValueError("expected_revision 必须是非负整数")
+        owner = cls._owner_key(plugin_id)
+        set_clauses = ["field_owners = field_owners || %s::jsonb"]
+        params: list[Any] = [json.dumps({field: owner}, ensure_ascii=False)]
+        if image_id is not None:
+            set_clauses.insert(0, "cover_image_id = %s")
+            params.insert(0, image_id)
+        params.extend((movie_id, expected_revision, field, field, owner))
+        cursor = Movie._meta.database.execute_sql(
+            f"""
+            UPDATE {Movie._meta.table_name}
+            SET {", ".join(set_clauses)},
+                mutation_revision = mutation_revision + 1,
+                updated_at = now()
+            WHERE id = %s
+              AND mutation_revision = %s
+              AND (field_owners->>%s IS NULL OR field_owners->>%s = %s)
+            """,
+            params,
+        )
+        return cursor.rowcount == 1
+
+    @classmethod
+    def replace_cover_image(
+        cls,
+        movie_id: int,
+        plugin_id: str,
+        image_id: int,
+        expected_revision: int,
+    ) -> bool:
+        """插件写封面：换引用并接管 owner；字段或版本冲突时整次零修改。"""
+        return cls._take_image_owner(
+            movie_id,
+            plugin_id,
+            "cover_image",
+            expected_revision,
+            image_id=image_id,
+        )
+
+    @classmethod
+    def take_plot_images_ownership(
+        cls,
+        movie_id: int,
+        plugin_id: str,
+        expected_revision: int,
+    ) -> bool:
+        """插件接管剧照集合；调用方需已持有该行事务锁，随后原子替换关联行。"""
+        return cls._take_image_owner(
+            movie_id, plugin_id, "plot_images", expected_revision
+        )
+
+    @classmethod
+    def release_image_owners(cls, movie_id: int, fields: tuple[str, ...]) -> None:
+        """宿主强制换图后清除图片 owner，把图片重新交回自动管理。"""
+        invalid = set(fields) - MOVIE_IMAGE_FIELDS
+        if invalid or not fields:
+            raise ValueError(f"非图片字段: {sorted(invalid)}")
+        expression = " - ".join("%s::text" for _ in fields)
+        Movie._meta.database.execute_sql(
+            f"""
+            UPDATE {Movie._meta.table_name}
+            SET field_owners = field_owners - {expression},
+                updated_at = now()
+            WHERE id = %s
+            """,
+            [*fields, movie_id],
+        )

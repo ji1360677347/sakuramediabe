@@ -22,7 +22,7 @@ from PIL import Image as PillowImage
 from PIL import ImageOps, UnidentifiedImageError
 
 from src.api.exception.errors import ApiError
-from src.common.media_paths import media_image_root_path
+from src.common.media_paths import media_image_root_path, normalize_asset_dir_name
 from src.common.runtime_time import utc_now_for_db
 from src.common.service_helpers import (
     build_ordered_expressions,
@@ -49,11 +49,16 @@ from src.schema.catalog.actors import (
 )
 from src.schema.catalog.movies import TagResource
 from src.schema.common.pagination import PageResponse
+from src.service.catalog.actor_ownership_gateway import ActorOwnershipGateway
 from src.service.catalog.catalog_import_service import (
     CatalogImportService,
     ImageDownloadError,
 )
 from src.service.catalog.image_cleanup_service import ImageCleanupService
+
+
+class _ProfileImageWriteConflict(Exception):
+    """头像覆盖的 owner 或 revision 冲突，事务整体回滚。"""
 
 
 class ActorService:
@@ -659,29 +664,15 @@ class ActorService:
         return cls.get_actor_detail(actor.id)
 
     @classmethod
-    def upload_profile_image(
-        cls,
-        actor_id: int,
-        *,
-        content: bytes,
-        content_type: str | None,
-    ) -> ActorDetailResource:
-        actor = cls._require_actor(actor_id)
+    def _render_profile_image_webp(cls, content: bytes, content_type: str | None) -> bytes:
+        """校验并归一化头像图片为 webp 字节；人工上传与插件写入共用。"""
         if len(content) > cls.ACTOR_PROFILE_IMAGE_MAX_BYTES:
             raise ApiError(413, "actor_profile_image_too_large", "头像图片不能超过 10 MiB")
         normalized_content_type = (content_type or "").lower().strip()
         if normalized_content_type and normalized_content_type not in cls.ACTOR_PROFILE_IMAGE_CONTENT_TYPES:
             raise ApiError(422, "invalid_actor_profile_image", "只支持 JPEG、PNG 或 WebP 图片")
-
-        image_root = media_image_root_path()
-        image_root.mkdir(parents=True, exist_ok=True)
-        temp_root = Path(tempfile.mkdtemp(prefix=".actor-profile-upload-", dir=image_root))
-        relative_path = Path("actors") / "manual" / f"{actor.id}-{uuid4().hex}.webp"
-        final_path = image_root / relative_path
-        committed = False
-        old_override = actor.profile_image_override if actor.profile_image_override_id else None
+        buffer = BytesIO()
         try:
-            temp_path = temp_root / "avatar.webp"
             with PillowImage.open(BytesIO(content)) as source:
                 if source.format not in cls.ACTOR_PROFILE_IMAGE_FORMATS:
                     raise ApiError(422, "invalid_actor_profile_image", "只支持 JPEG、PNG 或 WebP 图片")
@@ -698,27 +689,10 @@ class ActorService:
                     )
                     if normalized.mode not in {"RGB", "RGBA"}:
                         normalized = normalized.convert("RGBA" if "A" in normalized.getbands() else "RGB")
-                    normalized.save(temp_path, format="WEBP", quality=90, method=6)
+                    normalized.save(buffer, format="WEBP", quality=90, method=6)
                 finally:
                     if normalized is not source:
                         normalized.close()
-
-            final_path.parent.mkdir(parents=True, exist_ok=True)
-            temp_path.replace(final_path)
-            with get_database().atomic():
-                image = Image.create(origin=relative_path.as_posix())
-                cursor = get_database().execute_sql(
-                    """
-                    UPDATE actor
-                    SET profile_image_override_id = %s,
-                        updated_at = now()
-                    WHERE id = %s
-                    """,
-                    [image.id, actor.id],
-                )
-                if cursor.rowcount != 1:
-                    raise ApiError(404, "actor_not_found", "演员不存在")
-            committed = True
         except ApiError:
             raise
         except (
@@ -728,15 +702,117 @@ class ActorService:
             ValueError,
         ) as exc:
             raise ApiError(422, "invalid_actor_profile_image", "无法读取或处理头像图片") from exc
+        return buffer.getvalue()
+
+    @classmethod
+    def _write_profile_image_file(cls, relative_path: Path, content: bytes) -> None:
+        """把归一化后的头像写到正式图片目录：先写临时目录再原子替换。"""
+        image_root = media_image_root_path()
+        image_root.mkdir(parents=True, exist_ok=True)
+        temp_root = Path(tempfile.mkdtemp(prefix=".actor-profile-", dir=image_root))
+        try:
+            temp_path = temp_root / "avatar.webp"
+            temp_path.write_bytes(content)
+            final_path = image_root / relative_path
+            final_path.parent.mkdir(parents=True, exist_ok=True)
+            temp_path.replace(final_path)
         finally:
             shutil.rmtree(temp_root, ignore_errors=True)
-            if not committed:
-                final_path.unlink(missing_ok=True)
 
+    @staticmethod
+    def _cleanup_profile_override(old_override: Image | None) -> None:
         if old_override is not None:
             obsolete_paths = ImageCleanupService.delete_image_record_if_unused(old_override)
             ImageCleanupService.delete_obsolete_image_files(obsolete_paths)
+
+    @classmethod
+    def upload_profile_image(
+        cls,
+        actor_id: int,
+        *,
+        content: bytes,
+        content_type: str | None,
+    ) -> ActorDetailResource:
+        """人工上传头像覆盖：可覆盖任何插件 owner，图片归属记为人工。"""
+        actor = cls._require_actor(actor_id)
+        rendered = cls._render_profile_image_webp(content, content_type)
+        relative_path = Path("actors") / "manual" / f"{actor.id}-{uuid4().hex}.webp"
+        cls._write_profile_image_file(relative_path, rendered)
+        old_override = actor.profile_image_override if actor.profile_image_override_id else None
+        try:
+            with get_database().atomic():
+                image = Image.create(origin=relative_path.as_posix())
+                if not ActorOwnershipGateway.set_manual_profile_image_override(
+                    actor.id, image.id
+                ):
+                    raise ApiError(404, "actor_not_found", "演员不存在")
+        except Exception:
+            (media_image_root_path() / relative_path).unlink(missing_ok=True)
+            raise
+        cls._cleanup_profile_override(old_override)
         return cls.get_actor_detail(actor.id)
+
+    @classmethod
+    def set_profile_image_override(
+        cls,
+        actor_id: int,
+        plugin_id: str,
+        image_path: str,
+        expected_revision: int,
+    ) -> bool:
+        """插件写头像覆盖；人工覆盖或别的插件已持有时返回 False 且零修改。"""
+        from src.plugins.image_delivery import resolve_plugin_image_path
+
+        actor = Actor.resolve_canonical(actor_id)
+        if actor is None:
+            return False
+        content = resolve_plugin_image_path(plugin_id, image_path).read_bytes()
+        try:
+            rendered = cls._render_profile_image_webp(content, None)
+        except ApiError as exc:
+            raise ValueError(exc.message) from exc
+        relative_path = (
+            Path("actors")
+            / "plugin"
+            / normalize_asset_dir_name(plugin_id)
+            / f"{actor.id}-{uuid4().hex}.webp"
+        )
+        cls._write_profile_image_file(relative_path, rendered)
+        old_override = actor.profile_image_override if actor.profile_image_override_id else None
+        try:
+            with get_database().atomic():
+                image = Image.create(origin=relative_path.as_posix())
+                if not ActorOwnershipGateway.replace_profile_image_override(
+                    actor.id, plugin_id, image.id, expected_revision
+                ):
+                    raise _ProfileImageWriteConflict()
+        except _ProfileImageWriteConflict:
+            (media_image_root_path() / relative_path).unlink(missing_ok=True)
+            return False
+        except Exception:
+            (media_image_root_path() / relative_path).unlink(missing_ok=True)
+            raise
+        cls._cleanup_profile_override(old_override)
+        return True
+
+    @classmethod
+    def clear_profile_image_override(
+        cls,
+        actor_id: int,
+        plugin_id: str,
+        expected_revision: int,
+    ) -> bool:
+        """插件移除自己的头像覆盖；人工覆盖保持不变。"""
+        actor = Actor.resolve_canonical(actor_id)
+        if actor is None:
+            return False
+        old_override = actor.profile_image_override if actor.profile_image_override_id else None
+        if not ActorOwnershipGateway.clear_profile_image_override(
+            actor.id, plugin_id, expected_revision
+        ):
+            return False
+        cls._cleanup_profile_override(old_override)
+        return True
 
     @classmethod
     def clear_profile_image(
@@ -747,19 +823,9 @@ class ActorService:
         old_override = actor.profile_image_override if actor.profile_image_override_id else None
         if old_override is None:
             return cls.get_actor_detail(actor.id)
-        cursor = get_database().execute_sql(
-            """
-            UPDATE actor
-            SET profile_image_override_id = NULL,
-                updated_at = now()
-            WHERE id = %s
-            """,
-            [actor.id],
-        )
-        if cursor.rowcount != 1:
+        if not ActorOwnershipGateway.clear_manual_profile_image_override(actor.id):
             raise ApiError(404, "actor_not_found", "演员不存在")
-        obsolete_paths = ImageCleanupService.delete_image_record_if_unused(old_override)
-        ImageCleanupService.delete_obsolete_image_files(obsolete_paths)
+        cls._cleanup_profile_override(old_override)
         return cls.get_actor_detail(actor.id)
 
     @classmethod

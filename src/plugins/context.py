@@ -44,7 +44,7 @@ from src.plugins.types import (
 
 
 class ActorApi:
-    """context.actors：演员只读快照与资料 patch，不暴露 ORM。"""
+    """context.actors：演员只读快照、资料 patch 与头像覆盖写入，不暴露 ORM。"""
 
     def __init__(self, plugin_id: str):
         self._plugin_id = plugin_id
@@ -92,6 +92,28 @@ class ActorApi:
             return False
         return ActorOwnershipGateway.patch_plugin(
             canonical.id, self._plugin_id, fields, expected_revision
+        )
+
+    def set_profile_image(
+        self, actor_id: int, image_path: str, expected_revision: int
+    ) -> bool:
+        """用插件交付的本地图片替换演员头像并取得 owner。
+
+        ``image_path`` 必须位于插件自己的 ``data/`` 目录内；人工上传的头像覆盖
+        或别的插件已持有时返回 False 且零修改。
+        """
+        from src.service.catalog.actor_service import ActorService
+
+        return ActorService.set_profile_image_override(
+            actor_id, self._plugin_id, image_path, expected_revision
+        )
+
+    def clear_profile_image(self, actor_id: int, expected_revision: int) -> bool:
+        """移除插件自己写入的头像覆盖，回到宿主原头像；人工覆盖不受影响。"""
+        from src.service.catalog.actor_service import ActorService
+
+        return ActorService.clear_profile_image_override(
+            actor_id, self._plugin_id, expected_revision
         )
 
 
@@ -318,6 +340,34 @@ class MovieApi:
             self._plugin_id,
             fields,
             expected_revision,
+        )
+
+    def set_cover(
+        self, movie_id: int, image_path: str, expected_revision: int
+    ) -> bool:
+        """用插件交付的本地图片替换封面并取得 owner。
+
+        ``image_path`` 必须位于插件自己的 ``data/`` 目录内；版本或 owner 冲突
+        返回 False。替换会同步重算薄封面并清理旧图。
+        """
+        from src.service.catalog.movie_image_write_service import (
+            MovieImageWriteService,
+        )
+
+        return MovieImageWriteService().set_cover(
+            movie_id, self._plugin_id, image_path, expected_revision
+        )
+
+    def set_plot_images(
+        self, movie_id: int, image_paths: list[str], expected_revision: int
+    ) -> bool:
+        """整组替换剧情图并取得 owner；传空列表表示清空。路径规则同 ``set_cover``。"""
+        from src.service.catalog.movie_image_write_service import (
+            MovieImageWriteService,
+        )
+
+        return MovieImageWriteService().set_plot_images(
+            movie_id, self._plugin_id, image_paths, expected_revision
         )
 
 

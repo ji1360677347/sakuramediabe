@@ -51,8 +51,12 @@ from src.service.catalog.movie_image_service import (
     PreparedImageFile,
     ThinCoverResolution,
 )
+from src.service.catalog.movie_image_write_service import (
+    apply_thin_cover_resolution,
+    delete_plot_image_vectors,
+    refresh_movie_thin_cover,
+)
 from src.service.catalog.movie_ownership_gateway import MovieOwnershipGateway
-from src.service.system.optional_services import image_search_enabled
 
 # 兼容既有导入路径：ImageDownloadError 等类型历史上从本模块导出，且多处 `except ImageDownloadError`
 # 依赖同一个类对象，这里显式再导出保证类身份唯一。
@@ -97,20 +101,14 @@ class CatalogImportService:
         *,
         refreshed: bool,
     ) -> set[str]:
-        # 薄封面 Image 记录的持久化交给图片服务，Movie.thin_cover_image 的回写留在编排层，
-        # 保证图片服务不写 Movie。
-        new_thin_cover_image = self.image_service.resolve_persisted_thin_cover_image(
+        return apply_thin_cover_resolution(
+            self.image_service,
+            movie,
+            old_thin_cover_image,
             resolution,
             plot_images_by_index,
             refreshed=refreshed,
         )
-        movie.thin_cover_image = new_thin_cover_image
-        movie.save(only=[Movie.thin_cover_image])
-        if old_thin_cover_image is None:
-            return set()
-        if new_thin_cover_image is not None and old_thin_cover_image.id == new_thin_cover_image.id:
-            return set()
-        return self.image_service.delete_image_record_if_unused(old_thin_cover_image)
 
     def import_movie_if_missing(
         self,
@@ -352,7 +350,52 @@ class CatalogImportService:
         return movie, True
 
 
-    def backfill_plugin_movie(self, movie: Movie, detail: JavdbMovieDetailResource) -> Movie:
+    def _plan_missing_images(
+        self,
+        movie: Movie,
+        detail: JavdbMovieDetailResource,
+        actors: list[JavdbMovieActorResource],
+    ) -> tuple[str | None, list[str], list[JavdbMovieActorResource]]:
+        """只补缺：算出真正需要下载的封面、剧照与缺头像的演员。
+
+        图片 owner 已存在时视为"有人负责"，宿主自动路径不再补；已有剧照批次
+        只整批存在或不存，不做逐张补齐。
+        """
+        owners = movie.field_owners or {}
+        cover_url = None
+        if movie.cover_image_id is None and owners.get("cover_image") is None:
+            cover_url = detail.cover_image
+        plot_urls: list[str] = []
+        if owners.get("plot_images") is None and not MoviePlotImage.select().where(
+            MoviePlotImage.movie == movie.id
+        ).exists():
+            plot_urls = self._unique_preserve_order(detail.plot_images or [])
+        actor_ids = [actor.javdb_id for actor in actors if actor.javdb_id]
+        missing_avatar_ids: set[str] = set(actor_ids)
+        if actor_ids:
+            for actor_row in Actor.select().where(Actor.javdb_id.in_(actor_ids)):
+                if (
+                    actor_row.profile_image_id is not None
+                    or actor_row.profile_image_override_id is not None
+                ):
+                    missing_avatar_ids.discard(actor_row.javdb_id)
+        actors_to_fill = [
+            actor for actor in actors if actor.javdb_id in missing_avatar_ids
+        ]
+        return cover_url, plot_urls, actors_to_fill
+
+    def backfill_plugin_movie(
+        self,
+        movie: Movie,
+        detail: JavdbMovieDetailResource,
+        *,
+        replace_images: bool = False,
+    ) -> Movie:
+        """把插件影片接入 JavDB：文案/互动全量覆盖。
+
+        图片默认只补缺；``replace_images=True`` 是人工强制重刷，整批替换封面/剧照
+        并重新下载缺头像演员的头像。
+        """
         if normalize_movie_number(movie.movie_number) != normalize_movie_number(
             detail.movie_number
         ):
@@ -367,11 +410,19 @@ class CatalogImportService:
         if conflict:
             raise ValueError("JavDB ID 已属于其他本地影片")
         actors = detail.actors if detail.actors_available else []
-        obsolete_paths = set()
-        old_plot_ids = []
+        if replace_images:
+            cover_url = detail.cover_image
+            plot_urls = self._unique_preserve_order(detail.plot_images or [])
+            actors_for_avatars = actors
+        else:
+            cover_url, plot_urls, actors_for_avatars = self._plan_missing_images(
+                movie, detail, actors
+            )
+        obsolete_paths: set[str] = set()
+        old_plot_ids: list[int] = []
         with (
             self.image_service.prepare_metadata_images(
-                movie.movie_number, detail.cover_image, detail.plot_images, actors
+                movie.movie_number, cover_url, plot_urls, actors_for_avatars
             ) as (cover, plots, actor_tasks, thin),
             self.persist_lock or nullcontext(),
             get_database().atomic(),
@@ -379,7 +430,35 @@ class CatalogImportService:
             movie = Movie.select().where(Movie.id == movie.id).for_update().get()
             if movie.javdb_id:
                 return movie
-            old_images = [movie.cover_image, movie.thin_cover_image]
+            owners = movie.field_owners or {}
+            old_images: list[Image] = []
+            if replace_images:
+                old_images = [movie.cover_image, movie.thin_cover_image]
+                if movie.cover_image is not None:
+                    movie.cover_image = None
+                    movie.save(only=[Movie.cover_image])
+                if movie.thin_cover_image is not None:
+                    movie.thin_cover_image = None
+                    movie.save(only=[Movie.thin_cover_image])
+                old_links = list(
+                    MoviePlotImage.select(MoviePlotImage, Image)
+                    .join(Image)
+                    .where(MoviePlotImage.movie == movie)
+                    .order_by(MoviePlotImage.id)
+                )
+                if old_links:
+                    MoviePlotImage.delete().where(
+                        MoviePlotImage.movie == movie
+                    ).execute()
+                old_images.extend(link.image for link in old_links)
+                old_plot_ids = [link.id for link in old_links]
+                if (
+                    owners.get("cover_image") is not None
+                    or owners.get("plot_images") is not None
+                ):
+                    MovieOwnershipGateway.release_image_owners(
+                        movie.id, ("cover_image", "plot_images")
+                    )
             values = {
                 "javdb_id": detail.javdb_id,
                 "javdb_next_check_at": None,
@@ -406,38 +485,69 @@ class CatalogImportService:
                     if getattr(detail, name)
                 },
             )
-            if cover is not None:
+            added_images = False
+            cover_written = False
+            if (
+                cover is not None
+                and (
+                    replace_images
+                    or (
+                        movie.cover_image_id is None
+                        and owners.get("cover_image") is None
+                    )
+                )
+            ):
                 movie.cover_image = self.image_service.persist_prepared_image(cover)
                 movie.save(only=[Movie.cover_image])
+                added_images = True
+                cover_written = True
             by_index = {}
-            if plots:
-                old_links = list(
-                    MoviePlotImage.select().where(MoviePlotImage.movie == movie)
+            if (
+                plots
+                and (
+                    replace_images
+                    or (
+                        owners.get("plot_images") is None
+                        and not MoviePlotImage.select()
+                        .where(MoviePlotImage.movie == movie)
+                        .exists()
+                    )
                 )
-                old_images.extend(link.image for link in old_links)
-                old_plot_ids = [link.id for link in old_links]
-                MoviePlotImage.delete().where(MoviePlotImage.movie == movie).execute()
+            ):
                 images = self.image_service.persist_prepared_images(plots)
                 for task in plots:
                     image = images[task.relative_path]
                     MoviePlotImage.create(movie=movie, image=image)
                     by_index[task.plot_index] = image
-            if thin.generated_task is not None or thin.selected_plot_index is not None:
+                added_images = True
+            # 薄封面若来自封面，只有封面确实写入时才可用：被拒收的下载图不能当薄封面。
+            thin_cover_usable = thin.generated_task is None or replace_images or cover_written
+            if (
+                (replace_images or added_images)
+                and movie.thin_cover_image_id is None
+                and thin_cover_usable
+                and (
+                    thin.generated_task is not None
+                    or thin.selected_plot_index is not None
+                )
+            ):
                 self._apply_thin_cover_resolution(
                     movie, None, thin, by_index, refreshed=False
                 )
             if detail.actors_available:
-                old_images.extend(
-                    Image.select()
-                    .join(Actor, on=(Actor.profile_image == Image.id))
-                    .where(Actor.javdb_id.in_([actor.javdb_id for actor in actors]))
-                )
                 MovieActor.delete().where(MovieActor.movie == movie).execute()
                 for actor_detail in actors:
+                    if replace_images:
+                        existing_actor = Actor.get_or_none(
+                            Actor.javdb_id == actor_detail.javdb_id
+                        )
+                        if existing_actor is not None and existing_actor.profile_image is not None:
+                            old_images.append(existing_actor.profile_image)
                     actor = self.upsert_actor_from_javdb_resource(
                         actor_detail,
                         profile_image_task=actor_tasks.get(actor_detail.javdb_id),
                         update_gender=True,
+                        replace_avatar=replace_images,
                     )
                     MovieActor.get_or_create(movie=movie, actor=actor)
             if detail.tags_available:
@@ -449,19 +559,9 @@ class CatalogImportService:
                     self.image_service.delete_image_record_if_unused(image)
                 )
             MovieHeatService.update_single_movie_heat(movie.id)
-        try:
-            self.image_service.delete_obsolete_image_files(obsolete_paths)
-            if old_plot_ids:
-                from src.service.discovery.qdrant_plot_image_store import (
-                    get_qdrant_plot_image_store,
-                )
-
-                if image_search_enabled():
-                    get_qdrant_plot_image_store().delete_by_plot_image_ids(old_plot_ids)
-        except Exception as exc:
-            logger.warning(
-                "补录完成，旧图片或索引清理失败 movie={} detail={}", movie.id, exc
-            )
+        self.image_service.delete_obsolete_image_files(obsolete_paths)
+        delete_plot_image_vectors(old_plot_ids)
+        self._backfill_thin_cover_if_missing(movie, replace_images=replace_images)
         MovieAssetPackService.rebuild_movie_asset_pack(self._movie_asset_dir(movie))
         return Movie.get_by_id(movie.id)
 
@@ -546,20 +646,30 @@ class CatalogImportService:
         self,
         movie: Movie,
         detail: JavdbMovieDetailResource,
+        *,
+        replace_images: bool = False,
     ) -> Movie:
-        """纯覆盖语义：按远端详情全量覆盖已存在影片的元数据（含 title/summary/互动数/图片/演员/标签），不触碰订阅与番号字段。
+        """按远端详情覆盖已存在影片的元数据：文案/互动/演员/标签全量替换，不触碰订阅与番号字段。
 
         是已存在影片元数据刷新的唯一入口（手动刷新接口），影片必须已存在。
+        图片默认只补缺（缺封面/剧照/头像才下载），``replace_images=True`` 才整批
+        替换图片，供人工强制重刷使用。
         """
         actors = detail.actors or []
         tags = detail.tags or []
-        plot_images = detail.plot_images or []
-        plot_urls = self._unique_preserve_order(plot_images)
+        actors_for_avatars = actors
+        if replace_images:
+            cover_url = detail.cover_image
+            plot_urls = self._unique_preserve_order(detail.plot_images or [])
+        else:
+            cover_url, plot_urls, actors_for_avatars = self._plan_missing_images(
+                movie, detail, actors
+            )
         cover_task, plot_tasks, actor_image_tasks_by_javdb_id = self.image_service.build_movie_import_image_tasks(
             movie.movie_number,
-            detail.cover_image,
+            cover_url,
             plot_urls,
-            actors,
+            actors_for_avatars,
         )
         image_tasks = self.image_service.collect_image_tasks(
             cover_task,
@@ -569,12 +679,15 @@ class CatalogImportService:
 
         # 严格刷新先把新图片全部下载到临时目录，避免中途失败污染正式目录。
         prepared_files = self.image_service.download_image_tasks_to_temporary_files(image_tasks)
-        thin_cover_resolution = self.image_service.resolve_thin_cover_from_prepared_images(
-            movie.movie_number,
-            cover_task,
-            plot_tasks,
-            prepared_files,
-        )
+        if replace_images or movie.thin_cover_image_id is None:
+            thin_cover_resolution = self.image_service.resolve_thin_cover_from_prepared_images(
+                movie.movie_number,
+                cover_task,
+                plot_tasks,
+                prepared_files,
+            )
+        else:
+            thin_cover_resolution = ThinCoverResolution()
         if thin_cover_resolution.generated_prepared_file is not None:
             prepared_files.append(thin_cover_resolution.generated_prepared_file)
         new_relative_paths = {prepared.image_task.relative_path for prepared in prepared_files}
@@ -584,7 +697,12 @@ class CatalogImportService:
         try:
             lock_context = self.persist_lock or nullcontext()
             with lock_context, get_database().atomic():
-                persisted_movie, obsolete_paths, old_plot_image_ids = self._refresh_movie_metadata_records_strict(
+                (
+                    persisted_movie,
+                    obsolete_paths,
+                    old_plot_image_ids,
+                    rejected_images,
+                ) = self._refresh_movie_metadata_records_strict(
                     movie=movie,
                     detail=detail,
                     actors=actors,
@@ -593,25 +711,24 @@ class CatalogImportService:
                     cover_task=cover_task,
                     plot_tasks=plot_tasks,
                     actor_image_tasks_by_javdb_id=actor_image_tasks_by_javdb_id,
+                    replace_images=replace_images,
                 )
-            if old_plot_image_ids:
-                try:
-                    from src.service.discovery.qdrant_plot_image_store import (
-                        get_qdrant_plot_image_store,
-                    )
-
-                    if image_search_enabled():
-                        get_qdrant_plot_image_store().delete_by_plot_image_ids(old_plot_image_ids)
-                except Exception as exc:
-                    logger.warning(
-                        "Delete refreshed plot image vectors failed count={} detail={}",
-                        len(old_plot_image_ids),
-                        exc,
-                    )
-            MovieAssetPackService.remove_movie_asset_pack(self._movie_asset_dir(persisted_movie))
+            delete_plot_image_vectors(old_plot_image_ids)
+            if prepared_files:
+                MovieAssetPackService.remove_movie_asset_pack(self._movie_asset_dir(persisted_movie))
             self.image_service.finalize_prepared_image_files(prepared_files)
             self.image_service.delete_obsolete_image_files(obsolete_paths - new_relative_paths)
-            MovieAssetPackService.rebuild_movie_asset_pack(self._movie_asset_dir(persisted_movie))
+            rejected_paths: set[str] = set()
+            for image in rejected_images:
+                rejected_paths.update(self.image_service.delete_image_record_if_unused(image))
+            self.image_service.delete_obsolete_image_files(rejected_paths)
+            thin_cover_backfilled = self._backfill_thin_cover_if_missing(
+                persisted_movie, replace_images=replace_images
+            )
+            if prepared_files or thin_cover_backfilled:
+                MovieAssetPackService.rebuild_movie_asset_pack(self._movie_asset_dir(persisted_movie))
+            if thin_cover_backfilled:
+                persisted_movie = Movie.get_by_id(persisted_movie.id)
             finalized = True
             logger.info(
                 "Catalog strict metadata refresh finished movie_id={} movie_number={}",
@@ -634,7 +751,8 @@ class CatalogImportService:
         cover_task: ImagePersistTask | None,
         plot_tasks: list[ImagePersistTask],
         actor_image_tasks_by_javdb_id: dict[str, ImagePersistTask],
-    ) -> tuple[Movie, set[str], list[int]]:
+        replace_images: bool,
+    ) -> tuple[Movie, set[str], list[int], list[Image]]:
         # 事务内先锁行重读（v2-lite 字段主权）：锁定期间当前 owner 状态稳定，
         # 之后受保护字段写入以本次读取为准，杜绝旧快照覆盖插件刚写入的值。
         movie = (
@@ -644,37 +762,57 @@ class CatalogImportService:
             .get()
         )
         obsolete_paths: set[str] = set()
+        # 下载期间槽位可能已被插件/人工接管：本次下载的图不再落引用，交调用方回收。
+        rejected_images: list[Image] = []
+        movie_owners = movie.field_owners or {}
+        cover_taken = (
+            not replace_images
+            and cover_task is not None
+            and movie_owners.get("cover_image") is not None
+        )
+        plots_taken = (
+            not replace_images
+            and bool(plot_tasks)
+            and movie_owners.get("plot_images") is not None
+        )
 
         old_cover_image = movie.cover_image
         old_thin_cover_image = movie.thin_cover_image
-        if old_cover_image is not None:
-            movie.cover_image = None
-            movie.save(only=[Movie.cover_image])
-        if old_thin_cover_image is not None:
-            movie.thin_cover_image = None
-            movie.save(only=[Movie.thin_cover_image])
-
-        # 先清空旧剧情图关联，再按远端最新顺序重建，保证详情页严格一致。
         old_plot_links = list(
             MoviePlotImage.select(MoviePlotImage, Image)
             .join(Image)
             .where(MoviePlotImage.movie == movie)
             .order_by(MoviePlotImage.id)
         )
-        if old_plot_links:
-            MoviePlotImage.delete().where(MoviePlotImage.movie == movie).execute()
-        old_plot_image_ids = [link.id for link in old_plot_links]
+        old_plot_image_ids: list[int] = []
+        if replace_images:
+            if old_cover_image is not None:
+                movie.cover_image = None
+                movie.save(only=[Movie.cover_image])
+            if old_thin_cover_image is not None:
+                movie.thin_cover_image = None
+                movie.save(only=[Movie.thin_cover_image])
+            # 整批替换后图片回到宿主自动管理：清掉插件/人工留下的图片 owner。
+            if movie_owners.get("cover_image") is not None or movie_owners.get("plot_images") is not None:
+                MovieOwnershipGateway.release_image_owners(
+                    movie.id, ("cover_image", "plot_images")
+                )
+            # 先清空旧剧情图关联，再按远端最新顺序重建，保证详情页严格一致。
+            if old_plot_links:
+                MoviePlotImage.delete().where(MoviePlotImage.movie == movie).execute()
+            old_plot_image_ids = [link.id for link in old_plot_links]
 
         # 演员关系同样按远端列表全量替换，避免残留已下线演员。
         MovieActor.delete().where(MovieActor.movie == movie).execute()
 
         images_to_cleanup: dict[int, Image] = {}
-        for image in [old_cover_image, old_thin_cover_image, *[plot_link.image for plot_link in old_plot_links]]:
-            if image is None:
-                continue
-            images_to_cleanup[int(image.id)] = image
-        for image in images_to_cleanup.values():
-            obsolete_paths.update(self.image_service.delete_image_record_if_unused(image))
+        if replace_images:
+            for image in [old_cover_image, old_thin_cover_image, *[plot_link.image for plot_link in old_plot_links]]:
+                if image is None:
+                    continue
+                images_to_cleanup[int(image.id)] = image
+            for image in images_to_cleanup.values():
+                obsolete_paths.update(self.image_service.delete_image_record_if_unused(image))
 
         movie.release_date = detail.release_date
         movie.duration_minutes = detail.duration_minutes or 0
@@ -689,7 +827,12 @@ class CatalogImportService:
         movie.director_name = detail.director_name
         movie.javdb_id = detail.javdb_id
         movie.title = detail.title
-        movie.cover_image = self.image_service.persist_refreshed_image_record(cover_task)
+        if cover_taken:
+            rejected_images.append(
+                self.image_service.persist_refreshed_image_record(cover_task)
+            )
+        elif replace_images or cover_task is not None:
+            movie.cover_image = self.image_service.persist_refreshed_image_record(cover_task)
 
         # 受保护字段（白名单内）不允许随宿主窄更新落库，改走唯一写入网关
         # （update_host_unowned 只更新未接管字段）；其余字段显式窄更新。
@@ -730,6 +873,7 @@ class CatalogImportService:
             actor, actor_obsolete_paths = self._refresh_actor_from_javdb_resource_strict(
                 actor_resource=actor_resource,
                 profile_image_task=actor_image_tasks_by_javdb_id.get(actor_resource.javdb_id),
+                replace_images=replace_images,
             )
             obsolete_paths.update(actor_obsolete_paths)
             MovieActor.get_or_create(movie=movie, actor=actor)
@@ -737,29 +881,40 @@ class CatalogImportService:
         self._replace_movie_tags(movie, tags)
 
         plot_images_by_index: dict[int, Image] = {}
-        # 剧照整批一次 upsert，避免逐张 get_or_none + create 的 2N 次往返。
-        plot_images_by_path = self.image_service.persist_refreshed_image_records(plot_tasks)
-        for plot_task in plot_tasks:
-            plot_image = plot_images_by_path.get(plot_task.relative_path)
-            if plot_image is None:
-                continue
-            if plot_task.plot_index is not None:
-                plot_images_by_index[int(plot_task.plot_index)] = plot_image
-            MoviePlotImage.get_or_create(movie=movie, image=plot_image)
-        obsolete_paths.update(
-            self._apply_thin_cover_resolution(
-                movie,
-                None,
-                thin_cover_resolution,
-                plot_images_by_index,
-                refreshed=True,
+        has_existing_plots = MoviePlotImage.select().where(
+            MoviePlotImage.movie == movie
+        ).exists()
+        if plots_taken:
+            rejected_images.extend(
+                self.image_service.persist_refreshed_image_records(plot_tasks).values()
             )
-        )
+        elif replace_images or (plot_tasks and not has_existing_plots):
+            # 剧照整批一次 upsert，避免逐张 get_or_none + create 的 2N 次往返。
+            plot_images_by_path = self.image_service.persist_refreshed_image_records(plot_tasks)
+            for plot_task in plot_tasks:
+                plot_image = plot_images_by_path.get(plot_task.relative_path)
+                if plot_image is None:
+                    continue
+                if plot_task.plot_index is not None:
+                    plot_images_by_index[int(plot_task.plot_index)] = plot_image
+                MoviePlotImage.get_or_create(movie=movie, image=plot_image)
+        # 封面被他人接管时不采用本次下载解析出的薄封面（可能取自被拒收的封面图），
+        # 交给调用方基于库里真实图片重算。
+        if (replace_images or movie.thin_cover_image_id is None) and not cover_taken:
+            obsolete_paths.update(
+                self._apply_thin_cover_resolution(
+                    movie,
+                    None,
+                    thin_cover_resolution,
+                    plot_images_by_index,
+                    refreshed=True,
+                )
+            )
 
         # 受保护字段可能未全部落库（被插件接管的字段保留插件值）：重读该行，
         # 保证返回对象与库内真实状态一致（内存中的远端值不得外泄给调用方）。
         movie = Movie.get_by_id(movie.id)
-        return movie, obsolete_paths, old_plot_image_ids
+        return movie, obsolete_paths, old_plot_image_ids, rejected_images
 
     @staticmethod
     def _replace_movie_tags(movie: Movie, tags) -> None:
@@ -804,6 +959,7 @@ class CatalogImportService:
         *,
         actor_resource: JavdbMovieActorResource,
         profile_image_task: ImagePersistTask | None,
+        replace_images: bool,
     ) -> tuple[Actor, set[str]]:
         actor = Actor.get_or_none(Actor.javdb_id == actor_resource.javdb_id)
         if actor is not None and actor.merged_into_id is not None:
@@ -826,14 +982,25 @@ class CatalogImportService:
                 set(),
             )
 
-        old_profile_image = actor.profile_image
-        actor.profile_image = None
-        actor.save(only=[Actor.profile_image])
         obsolete_paths: set[str] = set()
-        if old_profile_image is not None:
-            obsolete_paths.update(self.image_service.delete_image_record_if_unused(old_profile_image))
-
-        profile_image = self.image_service.persist_refreshed_image_record(profile_image_task)
+        if replace_images:
+            old_profile_image = actor.profile_image
+            actor.profile_image = None
+            actor.save(only=[Actor.profile_image])
+            if old_profile_image is not None:
+                obsolete_paths.update(
+                    self.image_service.delete_image_record_if_unused(old_profile_image)
+                )
+            profile_image = self.image_service.persist_refreshed_image_record(
+                profile_image_task
+            )
+        elif actor.profile_image_id is None and actor.profile_image_override_id is None:
+            # 只补缺：没有头像（也没有人工/插件覆盖）时才写入。
+            profile_image = self.image_service.persist_refreshed_image_record(
+                profile_image_task
+            )
+        else:
+            profile_image = actor.profile_image
         actor.name = actor_resource.name
         actor.alias_name = merge_actor_alias_name(
             primary_name=actor_resource.name,
@@ -847,35 +1014,24 @@ class CatalogImportService:
 
     def backfill_movie_thin_cover(self, movie: Movie) -> bool:
         """基于已落盘的封面和剧情图，为历史影片补算竖封面图。"""
-        lock_context = self.persist_lock or nullcontext()
-        obsolete_paths: set[str] = set()
-        with lock_context, get_database().atomic():
-            movie = Movie.get_by_id(movie.id)
-            old_thin_cover_image = movie.thin_cover_image
-            plot_links = list(
-                MoviePlotImage.select(MoviePlotImage, Image)
-                .join(Image)
-                .where(MoviePlotImage.movie == movie)
-                .order_by(MoviePlotImage.id)
-            )
-            thin_cover_resolution = self.image_service.resolve_thin_cover_from_existing_movie(movie, plot_links)
-            plot_images_by_index = {
-                plot_index: plot_link.image
-                for plot_index, plot_link in enumerate(plot_links)
-            }
-            obsolete_paths.update(
-                self._apply_thin_cover_resolution(
-                    movie,
-                    old_thin_cover_image,
-                    thin_cover_resolution,
-                    plot_images_by_index,
-                    refreshed=False,
-                )
-            )
-        self.image_service.delete_obsolete_image_files(obsolete_paths)
-        MovieAssetPackService.rebuild_movie_asset_pack(self._movie_asset_dir(movie))
-        refreshed_movie = Movie.get_by_id(movie.id)
-        return refreshed_movie.thin_cover_image_id is not None
+        return refresh_movie_thin_cover(movie.id, self.image_service)
+
+    def _backfill_thin_cover_if_missing(
+        self,
+        movie: Movie,
+        *,
+        replace_images: bool,
+    ) -> bool:
+        """图片未被本次刷新替换时薄封面可能仍缺失：基于已落盘图片重算，保留自愈。
+
+        ``replace_images=True`` 已从新下载的封面/剧照重算过，无需再算。
+        返回是否真的重算出了薄封面，供调用方决定资产包重建与重读。
+        """
+        if replace_images or movie.thin_cover_image_id is not None:
+            return False
+        return refresh_movie_thin_cover(
+            movie.id, self.image_service, rebuild_asset_pack=False
+        )
 
     def upsert_actor_from_javdb_resource(
         self,
@@ -883,11 +1039,14 @@ class CatalogImportService:
         profile_image_task: ImagePersistTask | None = None,
         *,
         update_gender: bool = False,
+        replace_avatar: bool = False,
     ) -> Actor:
         """把 JavDB 演员资源同步到本地，并在可用时补全头像。
 
         演员搜索等非影片入库场景只能同步身份和头像信息；只有新影片入库
         显式传入 ``update_gender=True`` 时，才使用影片详情中的性别写入本地。
+        头像只补缺：本地已有头像（含人工/插件覆盖）时不替换；
+        ``replace_avatar=True`` 是显式强制替换，供人工强制重刷使用。
         """
         existing = Actor.get_or_none(Actor.javdb_id == actor_resource.javdb_id)
         if existing is not None and existing.merged_into_id is not None:
@@ -895,7 +1054,13 @@ class CatalogImportService:
                 existing, actor_resource, update_gender=update_gender
             )
 
-        if profile_image_task is None:
+        existing_has_avatar = existing is not None and (
+            existing.profile_image_id is not None
+            or existing.profile_image_override_id is not None
+        )
+        if existing_has_avatar and not replace_avatar:
+            profile_image = None
+        elif profile_image_task is None:
             profile_image = self.image_service.persist_image(
                 owner_type="actor",
                 owner_key=actor_resource.javdb_id,

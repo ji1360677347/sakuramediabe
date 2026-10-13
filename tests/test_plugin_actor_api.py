@@ -126,7 +126,9 @@ def test_host_writes_preserve_plugin_metadata(actors):
     resource = JavdbMovieActorResource(javdb_id="actor-1", name="新名字", gender=1)
     importer = CatalogImportService()
     importer.upsert_actor_from_javdb_resource(resource, update_gender=True)
-    importer._refresh_actor_from_javdb_resource_strict(actor_resource=resource, profile_image_task=None)
+    importer._refresh_actor_from_javdb_resource_strict(
+        actor_resource=resource, profile_image_task=None, replace_images=True
+    )
     ActorService.set_subscription(actor.id, True)
     snapshot = actors.get(actor.id)
     assert snapshot.values["height_cm"] == 159

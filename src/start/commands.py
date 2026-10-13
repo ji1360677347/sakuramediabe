@@ -511,10 +511,13 @@ def plugins_validate_installation():
     "fields",
     multiple=True,
     type=str,
-    help="只清除指定字段的 owner（可重复）；不传则清除该插件全部字段 owner。",
+    help=(
+        "只清除指定字段/图片的 owner（可重复，图片 key：cover_image / "
+        "plot_images / profile_image_override）；不传则清除该插件全部 owner。"
+    ),
 )
 def plugins_clear_field_owners(plugin_id: str, fields: tuple[str, ...], entity: str):
-    """解除插件对影片或演员字段的接管，保留字段值。"""
+    """解除插件对影片或演员字段、图片的接管，保留字段值与图片。"""
     from src.service.catalog.actor_ownership_gateway import ActorOwnershipGateway
     from src.service.catalog.movie_ownership_gateway import MovieOwnershipGateway
 

@@ -54,7 +54,7 @@ ACTOR_SNAPSHOT_FIELDS: tuple[str, ...] = (
 
 @dataclass(frozen=True)
 class ActorSnapshot:
-    """演员身份和资料快照；revision 只覆盖资料及字段归属。"""
+    """演员身份和资料快照；revision 覆盖资料、字段归属与头像覆盖。"""
 
     actor_id: int
     revision: int
@@ -81,8 +81,9 @@ class MovieSnapshot:
     """影片不可变快照（v2-lite）：插件读取/导入的出口，绝不暴露内部 ORM 对象。
 
     - ``values``：MOVIE_SNAPSHOT_FIELDS 固定只读集合的快照值；
-    - ``owners``：字段 -> owner 的接管映射（缺键代表自动宿主管理，``host:manual`` 代表人工）；
-    - ``revision``：受保护字段版本，``patch`` 的乐观并发依据。
+    - ``owners``：字段 -> owner 的接管映射（缺键代表自动宿主管理，``host:manual`` 代表人工），
+      另含 ``cover_image`` / ``plot_images`` 两个图片保留 key，它们不出现在 ``values`` 里；
+    - ``revision``：受保护字段与图片版本的统一并发依据，``patch`` 与图片写入都以它做乐观锁。
     - ``actors`` / ``tags``：影片关联的只读快照元组，不由影片 revision 覆盖。
     """
 

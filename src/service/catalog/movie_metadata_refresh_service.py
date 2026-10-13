@@ -167,7 +167,13 @@ class MovieMetadataRefreshService:
         )
 
     @classmethod
-    def refresh_movie_metadata(cls, movie_number: str) -> MovieDetailResource:
+    def refresh_movie_metadata(
+        cls,
+        movie_number: str,
+        *,
+        replace_images: bool = False,
+    ) -> MovieDetailResource:
+        """刷新已存在影片元数据；``replace_images=True`` 才整批替换图片。"""
         movie, normalized_movie_number = MovieService.require_movie_by_normalized_number(movie_number)
         detail = cls._fetch_remote_movie_metadata(
             movie=movie,
@@ -186,9 +192,13 @@ class MovieMetadataRefreshService:
         try:
             service = cls._build_catalog_import_service()
             refreshed_movie = (
-                service.backfill_plugin_movie(movie, detail)
+                service.backfill_plugin_movie(
+                    movie, detail, replace_images=replace_images
+                )
                 if not movie.javdb_id and movie.metadata_source
-                else service.refresh_movie_metadata_strict(movie, detail)
+                else service.refresh_movie_metadata_strict(
+                    movie, detail, replace_images=replace_images
+                )
             )
         except ImageDownloadError as exc:
             cls._raise_movie_metadata_refresh_failed(

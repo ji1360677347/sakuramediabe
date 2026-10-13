@@ -7,6 +7,7 @@ from typing import Any
 from src.model.catalog.actors import (
     ACTOR_FIELD_ALLOWED_VALUES,
     ACTOR_FIELD_CODECS,
+    ACTOR_OWNER_TRACKED_FIELDS,
     PROTECTED_ACTOR_FIELDS,
     Actor,
 )
@@ -119,8 +120,8 @@ class ActorOwnershipGateway:
     @classmethod
     def release_plugin_owners(cls, plugin_id: str, fields: tuple[str, ...] | None = None) -> int:
         """管理员释放归属，保留资料；推进版本使释放前的快照失效。"""
-        if fields is not None and (not fields or set(fields) - PROTECTED_ACTOR_FIELDS):
-            raise ValueError("fields 必须是非空的演员资料字段集合")
+        if fields is not None and (not fields or set(fields) - ACTOR_OWNER_TRACKED_FIELDS):
+            raise ValueError("fields 必须是非空的演员资料或头像字段集合")
         condition = "value = %s"
         params: list[Any] = [f"plugin:{plugin_id}"]
         if fields is not None:
@@ -139,3 +140,107 @@ class ActorOwnershipGateway:
             [*params, *params],
         )
         return cursor.rowcount
+
+    @classmethod
+    def _write_profile_image_override(
+        cls,
+        actor_id: int,
+        *,
+        image_id: int | None,
+        owner: str | None = None,
+        expected_revision: int | None = None,
+    ) -> bool:
+        """头像覆盖列与 ``field_owners`` 键的统一写入。
+
+        ``image_id`` 有值即写覆盖并接管 owner，为空即清覆盖并摘除 owner 键。
+        给 ``expected_revision`` 时是插件路径：要求版本一致，且写路径只接管"无主
+        空槽"（无主旧覆盖行按人工处理）或自己持有的槽位，清路径只清自己持有的；
+        ``owner`` 也只在该路径参与条件。不给版本时是人工路径，可覆盖任何 owner。
+        """
+        if expected_revision is not None and (
+            type(expected_revision) is not int or expected_revision < 0
+        ):
+            raise ValueError("expected_revision 必须是非负整数")
+        if image_id is not None:
+            assignments = (
+                "profile_image_override_id = %s, "
+                "field_owners = field_owners || %s::jsonb"
+            )
+            params: list[Any] = [
+                image_id,
+                json.dumps({"profile_image_override": owner}, ensure_ascii=False),
+            ]
+        else:
+            assignments = (
+                "profile_image_override_id = NULL, "
+                "field_owners = field_owners - 'profile_image_override'"
+            )
+            params = []
+        params.append(actor_id)
+        conditions = ""
+        if expected_revision is not None:
+            conditions = " AND mutation_revision = %s"
+            params.append(expected_revision)
+            if image_id is not None:
+                conditions += (
+                    " AND ((profile_image_override_id IS NULL"
+                    " AND field_owners->>'profile_image_override' IS NULL)"
+                    " OR field_owners->>'profile_image_override' = %s)"
+                )
+            else:
+                conditions += " AND field_owners->>'profile_image_override' = %s"
+            params.append(owner)
+        cursor = Actor._meta.database.execute_sql(
+            f"""
+            UPDATE actor
+            SET {assignments},
+                mutation_revision = mutation_revision + 1,
+                updated_at = now()
+            WHERE id = %s{conditions}
+            """,
+            params,
+        )
+        return cursor.rowcount == 1
+
+    @classmethod
+    def replace_profile_image_override(
+        cls,
+        actor_id: int,
+        plugin_id: str,
+        image_id: int,
+        expected_revision: int,
+    ) -> bool:
+        """插件写头像覆盖：仅当当前没有覆盖（或无主旧覆盖被人工接管）或 owner 是自己。"""
+        return cls._write_profile_image_override(
+            actor_id,
+            image_id=image_id,
+            owner=f"plugin:{plugin_id}",
+            expected_revision=expected_revision,
+        )
+
+    @classmethod
+    def clear_profile_image_override(
+        cls,
+        actor_id: int,
+        plugin_id: str,
+        expected_revision: int,
+    ) -> bool:
+        """插件移除自己的头像覆盖；人工覆盖不受影响。"""
+        return cls._write_profile_image_override(
+            actor_id,
+            image_id=None,
+            owner=f"plugin:{plugin_id}",
+            expected_revision=expected_revision,
+        )
+
+    @classmethod
+    def set_manual_profile_image_override(cls, actor_id: int, image_id: int) -> bool:
+        """人工上传头像：可覆盖任何插件 owner，并标记为人工持有。"""
+        return cls._write_profile_image_override(
+            actor_id, image_id=image_id, owner=MANUAL_ACTOR_FIELD_OWNER
+        )
+
+    @classmethod
+    def clear_manual_profile_image_override(cls, actor_id: int) -> bool:
+        """人工清除头像覆盖：同时清掉 owner 记录。"""
+        return cls._write_profile_image_override(actor_id, image_id=None)

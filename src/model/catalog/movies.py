@@ -16,6 +16,13 @@ PROTECTED_MOVIE_FIELDS: frozenset[str] = frozenset(
     {"title", "summary", "maker_name", "director_name", "is_collection", "is_blacklisted"}
 )
 
+# 图片引用不属于受保护字段（不进裸 save 护栏、不走字段 codec），但同样支持接管：
+# field_owners 用这两个保留 key 记录图片 owner，值为 plugin:<id>（影片图片目前只有
+# 插件显式写入口；host:manual 是保留值，与演员头像共用同一约定）。插件显式写图时
+# 写入 owner，宿主自动刷新只在"没有图的格子"里补图。
+MOVIE_IMAGE_FIELDS: frozenset[str] = frozenset({"cover_image", "plot_images"})
+MOVIE_OWNER_TRACKED_FIELDS: frozenset[str] = PROTECTED_MOVIE_FIELDS | MOVIE_IMAGE_FIELDS
+
 # 受保护字段 codec：字段名 -> 接受的值类型；开放写入前必须补上（v2-lite 文档约定）。
 MOVIE_FIELD_CODECS: dict[str, type] = {
     "title": str,

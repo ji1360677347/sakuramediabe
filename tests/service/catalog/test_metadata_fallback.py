@@ -33,6 +33,7 @@ from src.model import (
     MediaProgress,
     Movie,
     MovieActor,
+    MoviePlotImage,
     MovieTag,
     Tag,
 )
@@ -45,10 +46,12 @@ from src.plugins import (
 from src.plugins.extensions.metadata import METADATA_SOURCE_EXTENSION_KEY
 from src.plugins.loader import PluginLoadError, check_plugin_dir
 from src.service.catalog.catalog_import_service import CatalogImportService
+from src.service.catalog.image_cleanup_service import ImageCleanupService
 from src.service.catalog.metadata_source_service import (
     MetadataSourceError,
     MetadataSourceService,
 )
+from src.service.catalog.movie_asset_pack_service import MovieAssetPackService
 from src.service.catalog.movie_interaction_sync_service import (
     MovieInteractionSyncService,
 )
@@ -386,9 +389,8 @@ def test_backfill_preserves_identity_user_state_and_valid_missing_fields(
     assert again.id == old_id and not created and Movie.select().count() == 1
 
 
-def test_backfill_replaces_lists_and_images_after_preparation(
-    metadata_env, monkeypatch
-):
+def test_backfill_keeps_existing_images_and_replaces_lists(metadata_env, monkeypatch):
+    """图片只补缺：补录不再替换插件导入时已经落库的封面。"""
     movie = import_plugin(metadata_env, monkeypatch, actors=[])
     old_cover_origin = movie.cover_image.origin
     detail = remote_detail(
@@ -399,22 +401,86 @@ def test_backfill_replaces_lists_and_images_after_preparation(
         ],
     )
     result = metadata_env.service.backfill_plugin_movie(movie, detail)
-    new_cover_origin = result.cover_image.origin
-    assert (
-        new_cover_origin != old_cover_origin
-        and asset_bytes(new_cover_origin)
-        and asset_bytes(old_cover_origin) is None
-    )
+    assert result.cover_image.origin == old_cover_origin
+    assert asset_bytes(old_cover_origin)
     assert MovieTag.select().where(MovieTag.movie == movie).count() == 0
     assert MovieActor.get(MovieActor.movie == movie).actor.javdb_id == "new-actor"
 
 
-def test_strict_refresh_replaces_cover_inside_movie_pack(metadata_env, monkeypatch):
+def test_backfill_fills_missing_cover_only(metadata_env, monkeypatch):
+    """只有缺封面时才补图，已有剧照等其它图片不受影响。"""
+    movie = import_plugin(metadata_env, monkeypatch, actors=[])
+    movie.cover_image = None
+    movie.save(only=[Movie.cover_image])
+    detail = remote_detail(cover_image="https://example.com/new.png")
+
+    result = metadata_env.service.backfill_plugin_movie(movie, detail)
+
+    assert result.cover_image is not None
+    assert asset_bytes(result.cover_image.origin)
+
+
+def test_backfill_does_not_refill_plugin_owned_empty_slots(metadata_env, monkeypatch):
+    """插件显式清空并持有图片槽位时，宿主补录不回填，尊重插件意图。"""
+    movie = import_plugin(metadata_env, monkeypatch, actors=[])
+    movie.cover_image = None
+    movie.save(only=[Movie.cover_image])
+    Movie.update(
+        field_owners={
+            "cover_image": "plugin:cover_fix",
+            "plot_images": "plugin:cover_fix",
+        }
+    ).where(Movie.id == movie.id).execute()
+    detail = remote_detail(
+        cover_image="https://example.com/new.png",
+        plot_images=["https://example.com/plot.png"],
+    )
+
+    result = metadata_env.service.backfill_plugin_movie(movie, detail)
+
+    assert result.cover_image_id is None
+    assert MoviePlotImage.select().where(MoviePlotImage.movie == movie.id).count() == 0
+
+
+def test_forced_backfill_replaces_images_and_releases_owner(metadata_env, monkeypatch):
+    """人工强制重刷时补录也整批换图，并把图片 owner 交回宿主。"""
+    movie = import_plugin(metadata_env, monkeypatch, actors=[])
+    old_cover_origin = movie.cover_image.origin
+    Movie.update(field_owners={"cover_image": "plugin:cover_fix"}).where(
+        Movie.id == movie.id
+    ).execute()
+    detail = remote_detail(cover_image="https://example.com/new.png")
+
+    result = metadata_env.service.backfill_plugin_movie(
+        movie, detail, replace_images=True
+    )
+
+    assert result.cover_image.origin != old_cover_origin
+    assert asset_bytes(result.cover_image.origin)
+    assert asset_bytes(old_cover_origin) is None
+    assert "cover_image" not in (Movie.get_by_id(movie.id).field_owners or {})
+
+
+def test_strict_refresh_keeps_existing_cover_by_default(metadata_env, monkeypatch):
     movie = import_plugin(metadata_env, monkeypatch)
     old_cover_origin = movie.cover_image.origin
     detail = remote_detail(cover_image="https://example.com/new.png")
 
     result = metadata_env.service.refresh_movie_metadata_strict(movie, detail)
+
+    assert result.cover_image.origin == old_cover_origin
+    assert asset_bytes(old_cover_origin)
+    assert result.javdb_id == "real-id"
+
+
+def test_strict_refresh_replaces_cover_when_forced(metadata_env, monkeypatch):
+    movie = import_plugin(metadata_env, monkeypatch)
+    old_cover_origin = movie.cover_image.origin
+    detail = remote_detail(cover_image="https://example.com/new.png")
+
+    result = metadata_env.service.refresh_movie_metadata_strict(
+        movie, detail, replace_images=True
+    )
 
     new_cover_origin = result.cover_image.origin
     assert new_cover_origin != old_cover_origin
@@ -428,6 +494,77 @@ def test_strict_refresh_replaces_cover_inside_movie_pack(metadata_env, monkeypat
     assert [p.name for p in movie_dir.iterdir() if p.is_file()] == ["assets.zip"]
     with zipfile.ZipFile(movie_dir / "assets.zip") as archive:
         assert archive.namelist() == [Path(new_cover_origin).name]
+
+
+def _write_splittable_cover(path: Path) -> None:
+    """写左右双页封面：中间强边缘供 cv2 定位裁切点，右半即薄封面。"""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    image = PillowImage.new("RGB", (600, 400), "blue")
+    image.paste(PillowImage.new("RGB", (300, 400), "red"), (300, 0))
+    image.save(path, format="PNG")
+
+
+def test_strict_refresh_backfills_missing_thin_cover(metadata_env, monkeypatch):
+    """封面已存在、薄封面缺失时，刷新仍基于已落盘封面补出薄封面（只补缺不回退自愈）。"""
+    movie = import_plugin(metadata_env, monkeypatch)
+    assert movie.thin_cover_image_id is None
+    cover_path = metadata_env.root / "assets" / movie.cover_image.origin
+    _write_splittable_cover(cover_path)
+    MovieAssetPackService.remove_movie_asset_pack(
+        movie_asset_relative_dir(normalize_asset_dir_name(movie.movie_number))
+    )
+    detail = remote_detail(cover_image="https://example.com/new.png")
+
+    result = metadata_env.service.refresh_movie_metadata_strict(movie, detail)
+
+    assert result.cover_image.origin == movie.cover_image.origin
+    assert result.thin_cover_image_id is not None
+    assert asset_bytes(result.thin_cover_image.origin)
+
+
+def test_strict_refresh_drops_image_slots_taken_during_download(metadata_env, monkeypatch):
+    """下载期间封面/剧照槽位被插件接管：不回写引用，也不留下本次下载的图片记录与文件。"""
+    movie = import_plugin(metadata_env, monkeypatch)
+    old_cover = movie.cover_image
+    movie.cover_image = None
+    movie.save(only=[Movie.cover_image])
+    ImageCleanupService.delete_obsolete_image_files(
+        ImageCleanupService.delete_image_record_if_unused(old_cover)
+    )
+    download = metadata_env.service.image_service.image_downloader
+
+    def take_image_slots_while_downloading(url, path):
+        Movie.update(
+            field_owners={"cover_image": "plugin:cover_fix", "plot_images": "plugin:cover_fix"}
+        ).where(Movie.id == movie.id).execute()
+        download(url, path)
+
+    monkeypatch.setattr(
+        metadata_env.service.image_service,
+        "image_downloader",
+        take_image_slots_while_downloading,
+    )
+
+    result = metadata_env.service.refresh_movie_metadata_strict(
+        movie,
+        remote_detail(
+            cover_image="https://example.com/new.png",
+            plot_images=["https://example.com/plot.png"],
+        ),
+    )
+
+    movie_dir = movie_asset_relative_dir(normalize_asset_dir_name(movie.movie_number))
+    assert result.cover_image_id is None
+    assert result.thin_cover_image_id is None
+    assert result.field_owners == {
+        "cover_image": "plugin:cover_fix",
+        "plot_images": "plugin:cover_fix",
+    }
+    assert MoviePlotImage.select().where(MoviePlotImage.movie == movie.id).count() == 0
+    dropped_origins = [(movie_dir / name).as_posix() for name in ("cover.png", "plot-0.png")]
+    for dropped_origin in dropped_origins:
+        assert not Image.select().where(Image.origin == dropped_origin).exists()
+        assert not (metadata_env.root / "assets" / dropped_origin).exists()
 
 
 @pytest.mark.parametrize("method", ["backfill_plugin_movie", "refresh_movie_metadata_strict"])
@@ -447,8 +584,8 @@ def test_metadata_updates_replace_only_target_movie_tags(metadata_env, monkeypat
     assert set(actual) == expected and len(actual) == len(expected)
 
 
-@pytest.mark.parametrize("case", ["replace", "shared", "missing", "rollback"])
-def test_backfill_cleans_only_unreferenced_old_actor_images(
+@pytest.mark.parametrize("case", ["existing", "shared", "missing", "rollback"])
+def test_backfill_keeps_existing_actor_avatars(
     metadata_env, monkeypatch, case
 ):
     movie = import_plugin(metadata_env, monkeypatch)
@@ -484,12 +621,51 @@ def test_backfill_cleans_only_unreferenced_old_actor_images(
         service.backfill_plugin_movie(movie, detail)
 
     current = Actor.get_by_id(actor.id)
-    if case in {"missing", "rollback"}:
-        assert current.profile_image_id == old_image_id
-    else:
-        assert current.profile_image_id != old_image_id
+    assert current.profile_image_id == old_image_id
     assert (assets / current.profile_image.origin).is_file()
-    keep_old_image = case != "replace"
+    assert Image.select().where(Image.id == old_image_id).exists()
+    assert old_path.is_file()
+
+
+@pytest.mark.parametrize("case", ["replace", "shared"])
+def test_forced_refresh_cleans_only_unreferenced_old_actor_images(
+    metadata_env, monkeypatch, case
+):
+    """强制整批替换头像时，旧图无人引用才删除（新旧路径不同才能观察清理）。"""
+    movie = import_plugin(metadata_env, monkeypatch)
+    service = metadata_env.service
+
+    def download(url, path):
+        path.parent.mkdir(parents=True, exist_ok=True)
+        PillowImage.new("RGB", (600, 400), "blue").save(
+            path, format="JPEG" if path.suffix == ".jpg" else "PNG"
+        )
+
+    monkeypatch.setattr(service.image_service, "image_downloader", download)
+    actor = service.upsert_actor_from_javdb_resource(
+        JavdbMovieActor(
+            javdb_id="existing-actor", name="Actor",
+            avatar_url="https://example.com/old.png",
+        )
+    )
+    old_image_id = actor.profile_image_id
+    assets = metadata_env.root / "assets"
+    old_path = assets / actor.profile_image.origin
+    if case == "shared":
+        Actor.create(javdb_id="other-actor", name="Other", profile_image=old_image_id)
+    detail = remote_detail(actors=[
+        JavdbMovieActor(
+            javdb_id=actor.javdb_id, name=actor.name,
+            avatar_url="https://example.com/new.jpg",
+        )
+    ])
+
+    service.refresh_movie_metadata_strict(movie, detail, replace_images=True)
+
+    current = Actor.get_by_id(actor.id)
+    assert current.profile_image_id != old_image_id
+    assert (assets / current.profile_image.origin).is_file()
+    keep_old_image = case == "shared"
     assert Image.select().where(Image.id == old_image_id).exists() == keep_old_image
     assert old_path.is_file() == keep_old_image
 
@@ -517,6 +693,10 @@ def test_backfill_failure_preserves_old_data_and_files(metadata_env, monkeypatch
 
 def test_download_failure_does_not_bind_javdb_id(metadata_env, monkeypatch):
     movie = import_plugin(metadata_env, monkeypatch)
+    old_cover_origin = movie.cover_image.origin
+    # 只补缺语义下补录不会重新下载已有封面，先清空引用让下载真正发生。
+    movie.cover_image = None
+    movie.save(only=[Movie.cover_image])
     monkeypatch.setattr(
         metadata_env.service.image_service,
         "image_downloader",
@@ -527,7 +707,7 @@ def test_download_failure_does_not_bind_javdb_id(metadata_env, monkeypatch):
             movie, remote_detail(cover_image="https://example.com/new.png")
         )
     assert Movie.get_by_id(movie.id).javdb_id is None
-    assert asset_bytes(movie.cover_image.origin)
+    assert asset_bytes(old_cover_origin)
 
 
 def test_javdb_conflicts_do_not_merge_or_modify_movie(metadata_env, monkeypatch):

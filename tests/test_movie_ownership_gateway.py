@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import pytest
 
-from src.model import Movie
+from src.model import Image, Movie
 from src.service.catalog.movie_ownership_gateway import MovieOwnershipGateway
 
 
@@ -397,3 +397,39 @@ def test_release_plugin_owners_specific_field_no_match_keeps_owners(test_db):
     assert MovieOwnershipGateway.release_plugin_owners("plugin-a", ("summary",)) == 0
     movie = Movie.get_by_id(movie.id)
     assert movie.field_owners == {"title": "plugin:plugin-a"}
+
+
+def test_image_owner_take_replace_and_release(test_db):
+    """图片 owner 与文本字段共用 field_owners：可接管、可续写、可解绑。"""
+    movie = _create_movie(test_db)
+    cover = Image.create(origin="movies/00/ABP-001/cover.jpg")
+
+    assert MovieOwnershipGateway.replace_cover_image(
+        movie.id, "plugin-a", cover.id, expected_revision=0
+    )
+    movie = Movie.get_by_id(movie.id)
+    assert movie.cover_image_id == cover.id
+    assert movie.field_owners == {"cover_image": "plugin:plugin-a"}
+    assert movie.mutation_revision == 1
+
+    # 续写自己的图片字段允许；别的插件被挡；版本过期同样拒绝。
+    assert MovieOwnershipGateway.take_plot_images_ownership(
+        movie.id, "plugin-a", expected_revision=1
+    )
+    assert not MovieOwnershipGateway.take_plot_images_ownership(
+        movie.id, "plugin-b", expected_revision=2
+    )
+    assert not MovieOwnershipGateway.replace_cover_image(
+        movie.id, "plugin-b", cover.id, expected_revision=2
+    )
+
+    assert MovieOwnershipGateway.release_plugin_owners("plugin-a", ("cover_image",)) == 1
+    movie = Movie.get_by_id(movie.id)
+    assert movie.cover_image_id == cover.id
+    assert movie.field_owners == {"plot_images": "plugin:plugin-a"}
+
+    # 宿主强制换图后清除图片 owner，把图片交回自动管理。
+    MovieOwnershipGateway.release_image_owners(
+        movie.id, ("cover_image", "plot_images")
+    )
+    assert Movie.get_by_id(movie.id).field_owners == {}

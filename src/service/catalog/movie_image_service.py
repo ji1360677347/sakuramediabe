@@ -205,11 +205,16 @@ class MovieImageService:
             logger.warning("Thin cover portrait check failed detail={}", exc)
             return False
 
-    def _build_generated_thin_cover_task(self, movie_number: str, extension: str) -> ImagePersistTask:
+    def _build_generated_thin_cover_task(
+        self, movie_number: str, extension: str, *, token: str | None = None
+    ) -> ImagePersistTask:
         safe_owner_key = normalize_asset_dir_name(movie_number)
         normalized_extension = self._normalize_image_extension(extension)
+        # 图片路径必须不可变：显式替换场景带 token 生成新文件名，避免客户端长缓存吃旧图。
+        suffix = f"-{token}" if token else ""
         relative_path = (
-            movie_asset_relative_dir(safe_owner_key) / f"thin-cover{normalized_extension}"
+            movie_asset_relative_dir(safe_owner_key)
+            / f"thin-cover{suffix}{normalized_extension}"
         ).as_posix()
         absolute_path = media_image_root_path() / relative_path
         return ImagePersistTask(
@@ -224,8 +229,12 @@ class MovieImageService:
         movie_number: str,
         cover_bytes: bytes,
         extension: str,
+        *,
+        token: str | None = None,
     ) -> ImagePersistTask | None:
-        thin_cover_task = self._build_generated_thin_cover_task(movie_number, extension)
+        thin_cover_task = self._build_generated_thin_cover_task(
+            movie_number, extension, token=token
+        )
         if self._split_image(cover_bytes, thin_cover_task.absolute_path):
             return thin_cover_task
         try:
@@ -325,6 +334,8 @@ class MovieImageService:
         self,
         movie: Movie,
         plot_links: list[MoviePlotImage],
+        *,
+        token: str | None = None,
     ) -> ThinCoverResolution:
         cover_image = movie.cover_image
         if cover_image is not None and not should_skip_thin_cover_crop(movie.movie_number):
@@ -337,6 +348,7 @@ class MovieImageService:
                     movie.movie_number,
                     cover_bytes,
                     Path(cover_image.origin).suffix,
+                    token=token,
                 )
                 if thin_cover_task is not None:
                     return ThinCoverResolution(generated_task=thin_cover_task)
@@ -428,7 +440,9 @@ class MovieImageService:
             return None
 
         safe_owner_key = normalize_asset_dir_name(owner_key)
-        extension = self._normalize_image_extension(Path(urlparse(image_url).path).suffix)
+        extension = self._normalize_image_extension(
+            self._source_image_extension(image_url)
+        )
 
         if owner_type == "actor":
             relative_path = (Path("actors") / f"{safe_owner_key}{extension}").as_posix()
@@ -457,6 +471,13 @@ class MovieImageService:
             absolute_path=absolute_path,
             plot_index=plot_index,
         )
+
+    @staticmethod
+    def _source_image_extension(image_url: str) -> str:
+        """本地交付路径按真实文件名取后缀；远端 URL 走 urlparse，避免 query 干扰。"""
+        if "://" not in image_url:
+            return Path(image_url).suffix
+        return Path(urlparse(image_url).path).suffix
 
     def collect_image_tasks(
         self,
@@ -584,9 +605,20 @@ class MovieImageService:
 
     @contextmanager
     def prepare_metadata_images(
-        self, movie_number, cover, plots, actors=(), *, local=False
+        self,
+        movie_number,
+        cover,
+        plots,
+        actors=(),
+        *,
+        local=False,
+        generate_thin_cover=True,
     ):
-        """补缺与补录的新图独立落盘，调用方事务只切换已经存在的文件。"""
+        """补缺与补录的新图独立落盘，调用方事务只切换已经存在的文件。
+
+        ``generate_thin_cover=False`` 供"显式替换后重算薄封面"的调用方使用：
+        薄封面需要在新引用落库之后再计算，这里跳过可省一次无效切割。
+        """
         cover_task, plot_tasks, actor_tasks = self.build_movie_import_image_tasks(
             movie_number, cover, list(dict.fromkeys(plots)), list(actors)
         )
@@ -607,11 +639,14 @@ class MovieImageService:
                 with PillowImage.open(path) as image:
                     image.load()
                 prepared.append(PreparedImageFile(task, path, temp_root))
-            thin = self.resolve_thin_cover_from_prepared_images(
-                movie_number, cover_task, plot_tasks, prepared
-            )
-            if thin.generated_prepared_file is not None:
-                prepared.append(thin.generated_prepared_file)
+            if generate_thin_cover:
+                thin = self.resolve_thin_cover_from_prepared_images(
+                    movie_number, cover_task, plot_tasks, prepared
+                )
+                if thin.generated_prepared_file is not None:
+                    prepared.append(thin.generated_prepared_file)
+            else:
+                thin = ThinCoverResolution()
             token = uuid4().hex
             for item in prepared:
                 path = Path(item.image_task.relative_path)

@@ -15,6 +15,7 @@ from src.plugins.contracts import (
     PluginRegistration,
 )
 from src.plugins.extensions.ranking import (
+    RANKING_MULTI_SOURCE_HOST_API_VERSION,
     RANKING_SOURCE_EXTENSION_KEY,
     PluginRankingBoard,
     PluginRankingSource,
@@ -687,7 +688,7 @@ def test_loader_requires_host_api_10_for_multiple_ranking_sources(tmp_path):
     _write_plugin_dir(
         root,
         "multi_rank",
-        host_api_version=HOST_API_VERSION - 1,
+        host_api_version=RANKING_MULTI_SOURCE_HOST_API_VERSION - 1,
         init_source=_MULTI_RANKING_REGISTER_SOURCE,
     )
 
@@ -695,7 +696,7 @@ def test_loader_requires_host_api_10_for_multiple_ranking_sources(tmp_path):
 
     assert PLUGIN_LOAD_ERRORS["multi_rank"]["stage"] == "validate_extensions"
     assert (
-        f"Host API {HOST_API_VERSION}"
+        f"Host API {RANKING_MULTI_SOURCE_HOST_API_VERSION}"
         in PLUGIN_LOAD_ERRORS["multi_rank"]["message"]
     )
 

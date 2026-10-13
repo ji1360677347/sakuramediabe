@@ -3,7 +3,8 @@
 锁住三条导入语义，防止重构把它改回"全能 upsert"：
 
 1. ``import_movie_if_missing``：纯新建——已存在影片一个字段都不写；
-2. ``refresh_movie_metadata_strict``：纯覆盖——手动刷新入口，已存在影片全量覆盖；
+2. ``refresh_movie_metadata_strict``：覆盖——手动刷新入口，文案/互动/演员/标签全量覆盖，
+   图片默认只补缺（``replace_images=True`` 才整批替换）；
 3. ``update_movie_fields``：指定字段更新——不存在先完整导入，存在只写白名单字段。
 """
 
@@ -209,6 +210,7 @@ def test_strict_actor_refresh_preserves_existing_gender(test_db):
     CatalogImportService()._refresh_actor_from_javdb_resource_strict(
         actor_resource=resource,
         profile_image_task=None,
+        replace_images=True,
     )
 
     refreshed = Actor.get_by_id(actor.id)
@@ -358,6 +360,7 @@ def test_strict_refresh_keeps_canonical_identity_when_actor_javdb_id_merged(test
             alias_names=["旧别名"],
         ),
         profile_image_task=None,
+        replace_images=True,
     )
 
     actor, obsolete_paths = refreshed

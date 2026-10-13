@@ -17,7 +17,9 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from src.scheduler.contracts import JobDefinition
 
-HOST_API_VERSION = 10
+# 11：新增图片写入能力（context.movies.set_cover / set_plot_images、
+# context.actors.set_profile_image / clear_profile_image）。
+HOST_API_VERSION = 11
 MIN_SUPPORTED_HOST_API_VERSION = 4
 
 

@@ -209,8 +209,16 @@ def create_movie_metadata_import(payload: MovieMetadataImportRequest):
 
 
 @router.post("/{movie_number}/metadata-refresh", response_model=MovieDetailResource)
-def refresh_movie_metadata(movie_number: str):
-    return MovieMetadataRefreshService.refresh_movie_metadata(movie_number)
+def refresh_movie_metadata(
+    movie_number: str,
+    refresh_images: bool = Query(
+        default=False,
+        description="强制整批替换封面/剧照/头像；默认只补缺图。",
+    ),
+):
+    return MovieMetadataRefreshService.refresh_movie_metadata(
+        movie_number, replace_images=refresh_images
+    )
 
 
 # 影片单片翻译端点已删除；互动同步由常规定时任务负责。

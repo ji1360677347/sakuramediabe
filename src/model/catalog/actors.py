@@ -50,6 +50,10 @@ ACTOR_FIELD_ALLOWED_VALUES: dict[str, frozenset[int]] = {
     "gender": frozenset({1, 2}),
 }
 PROTECTED_ACTOR_FIELDS = frozenset(ACTOR_FIELD_CODECS)
+# 头像覆盖列同样支持接管：field_owners 用这个保留 key 记录 owner，值形如
+# plugin:<id> 或 host:manual；没有 owner 的旧覆盖行按人工处理。
+ACTOR_IMAGE_FIELDS: frozenset[str] = frozenset({"profile_image_override"})
+ACTOR_OWNER_TRACKED_FIELDS: frozenset[str] = PROTECTED_ACTOR_FIELDS | ACTOR_IMAGE_FIELDS
 _GUARDED_FIELDS = PROTECTED_ACTOR_FIELDS | {
     "field_owners",
     "mutation_revision",
