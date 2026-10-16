@@ -392,3 +392,42 @@ def test_invalid_image_is_marked_failed(test_db, monkeypatch, tmp_path):
         MediaThumbnail.get_by_id(thumbnails[0].id).image_search_index_status
         == MediaThumbnail.IMAGE_SEARCH_INDEX_STATUS_FAILED
     )
+
+
+@pytest.mark.parametrize(("thumbnail_count", "plot_count"), [(2, 0), (0, 2)])
+def test_broken_png_is_skipped_without_aborting_batch(
+    test_db, monkeypatch, tmp_path, thumbnail_count, plot_count
+):
+    thumbnails, plot_images, paths = _prepare_images(
+        tmp_path, thumbnail_count=thumbnail_count, plot_count=plot_count
+    )
+    records = thumbnails or plot_images
+    broken_origin = records[0].image.origin
+
+    def read_image_bytes(origin: str) -> bytes:
+        if origin == broken_origin:
+            raise SyntaxError("broken PNG file (chunk b'\\xac\\xa1\\xac\\xb1')")
+        return paths[origin].read_bytes()
+
+    monkeypatch.setattr(
+        "src.service.discovery.image_search_index_service.read_image_bytes",
+        read_image_bytes,
+    )
+
+    stats = ImageSearchIndexService(
+        store=_Store("thumbnail"),
+        plot_store=_Store("plot"),
+        embedder=_Embedder(),
+    ).index_pending_images()
+
+    assert stats["processed"] == 2
+    assert stats["succeeded"] == 1
+    assert stats["failed"] == 1
+    assert stats["pending"] == 0
+    model = MediaThumbnail if thumbnails else MoviePlotImage
+    assert [
+        model.get_by_id(record.id).image_search_index_status for record in records
+    ] == [
+        model.IMAGE_SEARCH_INDEX_STATUS_FAILED,
+        model.IMAGE_SEARCH_INDEX_STATUS_SUCCESS,
+    ]

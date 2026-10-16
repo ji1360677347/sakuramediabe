@@ -817,30 +817,47 @@ class MovieImageService:
     def _download_image(self, image_url: str, target_path: Path) -> None:
         """下载单张图片并带有限次重试；失败时抛 ImageDownloadError。"""
         if target_path.exists():
-            logger.debug("Import image download skipped because local file exists path={}", str(target_path))
-            return
+            try:
+                self._validate_image_file(target_path)
+            except Exception as exc:
+                logger.warning(
+                    "Existing image is invalid; downloading again path={} detail={}",
+                    str(target_path),
+                    exc,
+                )
+                target_path.unlink(missing_ok=True)
+            else:
+                logger.debug(
+                    "Import image download skipped because local file exists path={}",
+                    str(target_path),
+                )
+                return
 
         last_error: Exception | None = None
         for attempt in range(1, self.IMAGE_DOWNLOAD_MAX_RETRIES + 1):
+            request_url = (
+                self._cache_busted_image_url(image_url) if attempt > 1 else image_url
+            )
             logger.debug(
                 "Import image download start url={} target={} attempt={}/{}",
-                image_url,
+                request_url,
                 str(target_path),
                 attempt,
                 self.IMAGE_DOWNLOAD_MAX_RETRIES,
             )
             try:
-                response = self.http_client.request("GET", image_url)
+                response = self.http_client.request("GET", request_url)
                 if response.status_code != 200:
                     raise ImageDownloadError(f"unexpected_status_code:{response.status_code}")
 
                 # JavDB app CDN 返回单字节 XOR 混淆字节，这里统一还原；
                 # 其余来源的明文图片原样返回。
                 content = deobfuscate_image_bytes(response.content)
+                self._validate_image_bytes(content)
                 target_path.write_bytes(content)
                 logger.debug(
                     "Import image download success url={} target={} size_bytes={} attempt={}",
-                    image_url,
+                    request_url,
                     str(target_path),
                     len(content),
                     attempt,
@@ -850,7 +867,7 @@ class MovieImageService:
                 last_error = exc
                 logger.warning(
                     "Import image download failed url={} target={} attempt={}/{} detail={}",
-                    image_url,
+                    request_url,
                     str(target_path),
                     attempt,
                     self.IMAGE_DOWNLOAD_MAX_RETRIES,
@@ -860,3 +877,25 @@ class MovieImageService:
                     time.sleep(backoff_delay(attempt, step=0.3, cap=1.0))
 
         raise ImageDownloadError(f"download_failed:{image_url}:{last_error}")
+
+    @staticmethod
+    def _validate_image_bytes(content: bytes) -> None:
+        try:
+            with PillowImage.open(BytesIO(content)) as image:
+                image.load()
+        except Exception as exc:
+            raise ImageDownloadError(f"invalid_image:{exc}") from exc
+
+    @staticmethod
+    def _validate_image_file(path: Path) -> None:
+        with PillowImage.open(path) as image:
+            image.load()
+
+    @staticmethod
+    def _cache_busted_image_url(image_url: str) -> str:
+        """重试 app CDN 时绕开已损坏的缓存副本；其他来源保持 URL 不变。"""
+        parsed = urlparse(image_url)
+        if parsed.hostname != "tp.spfcas.com":
+            return image_url
+        query = f"{parsed.query}&v={uuid4().hex}" if parsed.query else f"v={uuid4().hex}"
+        return parsed._replace(query=query).geturl()

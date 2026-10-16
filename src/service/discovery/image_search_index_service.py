@@ -299,19 +299,14 @@ class ImageSearchIndexService:
                             read_image_bytes(thumbnail.image.origin)
                         )
                     )
-                except FileNotFoundError:
+                except Exception as exc:
+                    # 单张图读取/解码失败只跳过该图，不能中断整批索引。
                     logger.warning(
-                        "Image search thumbnail file is missing thumbnail_id={} media_id={}",
+                        "Image search thumbnail is unavailable thumbnail_id={} media_id={} origin={} detail={}",
                         thumbnail.id,
                         thumbnail.media_id,
-                    )
-                    failed_ids.append(thumbnail.id)
-                    continue
-                except ValueError:
-                    logger.warning(
-                        "Image search thumbnail file is invalid thumbnail_id={} media_id={}",
-                        thumbnail.id,
-                        thumbnail.media_id,
+                        thumbnail.image.origin,
+                        exc,
                     )
                     failed_ids.append(thumbnail.id)
                     continue
@@ -367,19 +362,14 @@ class ImageSearchIndexService:
                             read_image_bytes(plot_image.image.origin)
                         )
                     )
-                except FileNotFoundError:
+                except Exception as exc:
+                    # 单张剧情图读取/解码失败只跳过该图，不能中断整批索引。
                     logger.warning(
-                        "Plot image file is missing plot_image_id={} movie_id={}",
+                        "Plot image is unavailable plot_image_id={} movie_id={} origin={} detail={}",
                         plot_image.id,
                         plot_image.movie_id,
-                    )
-                    failed_ids.append(plot_image.id)
-                    continue
-                except ValueError:
-                    logger.warning(
-                        "Plot image file is invalid plot_image_id={} movie_id={}",
-                        plot_image.id,
-                        plot_image.movie_id,
+                        plot_image.image.origin,
+                        exc,
                     )
                     failed_ids.append(plot_image.id)
                     continue
