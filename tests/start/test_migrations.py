@@ -45,6 +45,7 @@ from src.start.migrations.runner import (
     MOMENT_COLLECTIONS_MIGRATION_NAME,
     MOVIE_BLACKLIST_MIGRATION_NAME,
     MOVIE_COLLECTION_OWNER_MIGRATION_NAME,
+    MOVIE_INTERACTION_SORT_INDEXES_MIGRATION_NAME,
     MOVIE_MEDIA_REPLACEMENT_MIGRATION_NAME,
     PLUGIN_COLLECTION_OWNERSHIP_MIGRATION_NAME,
     PLUGIN_MOVIE_METADATA_MIGRATION_NAME,
@@ -146,6 +147,7 @@ def test_current_migrations_are_discoverable_in_order():
         VIEW_HISTORY_MIGRATION_NAME,
         MEDIA_THUMBNAIL_ARCHIVE_MIGRATION_NAME,
         MOVIE_MEDIA_REPLACEMENT_MIGRATION_NAME,
+        MOVIE_INTERACTION_SORT_INDEXES_MIGRATION_NAME,
     ]
 
 
@@ -249,6 +251,9 @@ def test_run_pending_migrations_completes_fresh_current_schema_after_model_creat
         MigrationExecution(name=VIEW_HISTORY_MIGRATION_NAME, applied=True),
         MigrationExecution(name=MEDIA_THUMBNAIL_ARCHIVE_MIGRATION_NAME, applied=True),
         MigrationExecution(name=MOVIE_MEDIA_REPLACEMENT_MIGRATION_NAME, applied=True),
+        MigrationExecution(
+            name=MOVIE_INTERACTION_SORT_INDEXES_MIGRATION_NAME, applied=True
+        ),
     ]
     assert _schema_migration_names(clean_db) == [
         CONSOLIDATED_MIGRATION_NAME,
@@ -281,6 +286,7 @@ def test_run_pending_migrations_completes_fresh_current_schema_after_model_creat
         VIEW_HISTORY_MIGRATION_NAME,
         MEDIA_THUMBNAIL_ARCHIVE_MIGRATION_NAME,
         MOVIE_MEDIA_REPLACEMENT_MIGRATION_NAME,
+        MOVIE_INTERACTION_SORT_INDEXES_MIGRATION_NAME,
     ]
 
 
@@ -583,7 +589,7 @@ def test_consolidated_migration_upgrades_v0421_schema_and_preserves_required_mem
         SchemaMigration.create(name=CONSOLIDATED_MIGRATION_NAME)
     summary = run_pending_migrations(clean_db)
 
-    assert summary.applied_count == 29
+    assert summary.applied_count == 30
     assert clean_db.execute_sql(
         "SELECT interaction_synced_at FROM movie WHERE id = %s", (movie.id,)
     ).fetchone()[0] == datetime(2026, 8, 20, 1, 2, 3)
@@ -727,6 +733,31 @@ def test_image_origin_pattern_index_migration_creates_index(clean_db):
     assert "image_origin_pattern" in {
         index.name for index in clean_db.get_indexes("image")
     }
+
+
+def test_movie_interaction_sort_indexes_migration_creates_indexes(clean_db):
+    clean_db.bind(TEST_MODELS, bind_refs=False, bind_backrefs=False)
+    clean_db.create_tables(TEST_MODELS)
+    index_names = {
+        "movie_heat_sort",
+        "movie_score_sort",
+        "movie_score_number_sort",
+        "movie_watched_count_sort",
+        "movie_want_watch_count_sort",
+        "movie_comment_count_sort",
+    }
+    for index_name in index_names:
+        clean_db.execute_sql(f"DROP INDEX IF EXISTS {index_name}")
+    # 旧库仍有 score 单列索引；迁移会用它被复合索引替代后删除。
+    clean_db.execute_sql("CREATE INDEX IF NOT EXISTS movie_score ON movie (score)")
+
+    _load_migration_module(
+        Path(f"{MOVIE_INTERACTION_SORT_INDEXES_MIGRATION_NAME}.py")
+    ).migrate(clean_db)
+
+    movie_indexes = {index.name for index in clean_db.get_indexes("movie")}
+    assert index_names <= movie_indexes
+    assert "movie_score" not in movie_indexes
 
 
 def test_local_profile_and_moment_collection_migrations_add_runtime_indexes(clean_db):

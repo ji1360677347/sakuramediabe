@@ -16,6 +16,7 @@ from src.schema.catalog.movies import (
     MovieCollectionStatusResource,
     MovieCollectionType,
     MovieDetailResource,
+    MovieInteractionFilterOptionsResource,
     MovieListItemResource,
     MovieListStatus,
     MovieMergedPlaybackResource,
@@ -64,6 +65,16 @@ def list_movies(
     maker_name: str | None = Query(default=None),
     heat_min: int | None = Query(default=None, ge=0),
     heat_max: int | None = Query(default=None, ge=0),
+    score_min: float | None = Query(default=None, ge=0),
+    score_max: float | None = Query(default=None, ge=0),
+    score_number_min: int | None = Query(default=None, ge=0),
+    score_number_max: int | None = Query(default=None, ge=0),
+    watched_count_min: int | None = Query(default=None, ge=0),
+    watched_count_max: int | None = Query(default=None, ge=0),
+    want_watch_count_min: int | None = Query(default=None, ge=0),
+    want_watch_count_max: int | None = Query(default=None, ge=0),
+    comment_count_min: int | None = Query(default=None, ge=0),
+    comment_count_max: int | None = Query(default=None, ge=0),
     resolution: str | None = Query(default=None),
     blacklisted: bool = False,
     query: str | None = Query(default=None),
@@ -89,12 +100,30 @@ def list_movies(
         ),
         heat_min=heat_min,
         heat_max=heat_max,
+        score_min=score_min,
+        score_max=score_max,
+        score_number_min=score_number_min,
+        score_number_max=score_number_max,
+        watched_count_min=watched_count_min,
+        watched_count_max=watched_count_max,
+        want_watch_count_min=want_watch_count_min,
+        want_watch_count_max=want_watch_count_max,
+        comment_count_min=comment_count_min,
+        comment_count_max=comment_count_max,
         resolution=resolution,
         blacklisted=blacklisted,
         query=query,
         page=page,
         page_size=page_size,
     )
+
+
+@router.get(
+    "/interaction-filter-options",
+    response_model=MovieInteractionFilterOptionsResource,
+)
+def get_movie_interaction_filter_options():
+    return MovieService.get_interaction_filter_options()
 
 
 @router.get("/latest", response_model=PageResponse[MovieListItemResource])

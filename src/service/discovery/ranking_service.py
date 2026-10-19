@@ -10,6 +10,7 @@ from loguru import logger
 from src.api.exception.errors import ApiError
 from src.common.runtime_time import utc_now_for_db
 from src.common.service_helpers import (
+    apply_numeric_range_filters,
     emit_progress,
     with_movie_card_relations,
 )
@@ -81,8 +82,16 @@ def register_plugin_ranking_sources(
 
 
 class RankingCatalogService:
-    # 榜单条目允许的排序字段
-    RANKING_BOARD_ITEMS_SORT_FIELDS = ("rank", "heat")
+    # 榜单条目允许的排序字段：rank 来自榜单本身，其余取自 Movie。
+    RANKING_BOARD_ITEMS_SORT_FIELD_MAP = {
+        "rank": RankingItem.rank,
+        "heat": Movie.heat,
+        "score": Movie.score,
+        "score_number": Movie.score_number,
+        "watched_count": Movie.watched_count,
+        "want_watch_count": Movie.want_watch_count,
+        "comment_count": Movie.comment_count,
+    }
 
     @staticmethod
     def _require_source(source_key: str) -> RankingSourceDefinition:
@@ -162,7 +171,7 @@ class RankingCatalogService:
             )
 
         if (
-            field_name not in cls.RANKING_BOARD_ITEMS_SORT_FIELDS
+            field_name not in cls.RANKING_BOARD_ITEMS_SORT_FIELD_MAP
             or direction not in ("asc", "desc")
         ):
             raise ApiError(
@@ -177,9 +186,10 @@ class RankingCatalogService:
         if field_name == "rank":
             # 按 rank 排序无需 JOIN Movie，且 rank 本身即为唯一键，不再追加 tie-breaker
             return [tie_breaker], False
-        # 按 heat 排序需要 JOIN Movie，并补 rank 次级排序避免相同热度翻页错位
-        heat_expression = Movie.heat.asc() if ascending else Movie.heat.desc()
-        return [heat_expression, tie_breaker], True
+        # 按影片互动数排序需要 JOIN Movie，并补 rank 次级排序避免同值翻页错位
+        field = cls.RANKING_BOARD_ITEMS_SORT_FIELD_MAP[field_name]
+        field_expression = field.asc() if ascending else field.desc()
+        return [field_expression, tie_breaker], True
 
     @classmethod
     def list_movie_rankings(cls, movie_id: int) -> list[MovieRankingResource]:
@@ -248,6 +258,18 @@ class RankingCatalogService:
         page: int = 1,
         page_size: int = 20,
         sort: str | None = None,
+        heat_min: int | None = None,
+        heat_max: int | None = None,
+        score_min: float | None = None,
+        score_max: float | None = None,
+        score_number_min: int | None = None,
+        score_number_max: int | None = None,
+        watched_count_min: int | None = None,
+        watched_count_max: int | None = None,
+        want_watch_count_min: int | None = None,
+        want_watch_count_max: int | None = None,
+        comment_count_min: int | None = None,
+        comment_count_max: int | None = None,
     ) -> RankingBoardItemsResource:
         board = cls._require_board(source_key, board_key)
         normalized_period = cls._resolve_period(board, period)
@@ -265,6 +287,38 @@ class RankingCatalogService:
                 RankingItem.period == normalized_period,
                 Movie.is_blacklisted == False,
             )
+        )
+        base_query = apply_numeric_range_filters(
+            base_query,
+            (
+                ("heat", Movie.heat, heat_min, heat_max),
+                ("score", Movie.score, score_min, score_max),
+                (
+                    "score_number",
+                    Movie.score_number,
+                    score_number_min,
+                    score_number_max,
+                ),
+                (
+                    "watched_count",
+                    Movie.watched_count,
+                    watched_count_min,
+                    watched_count_max,
+                ),
+                (
+                    "want_watch_count",
+                    Movie.want_watch_count,
+                    want_watch_count_min,
+                    want_watch_count_max,
+                ),
+                (
+                    "comment_count",
+                    Movie.comment_count,
+                    comment_count_min,
+                    comment_count_max,
+                ),
+            ),
+            error_code="invalid_ranking_filter",
         )
         base_query = base_query.order_by(*order_expressions)
         total = base_query.count()

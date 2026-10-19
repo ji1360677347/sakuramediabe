@@ -182,6 +182,7 @@ def test_create_app_registers_image_search_routes():
     assert "/movies/{movie_number}/interaction-sync" not in paths
     assert "/movies/{movie_number}/heat-recompute" in paths
     assert "/movies/blacklist" in paths
+    assert "/movies/interaction-filter-options" in paths
     assert "/movies/series/{series_id}/metadata-imports" in paths
     assert "/movies/metadata-imports" in paths
     assert "/actors/metadata-imports" in paths

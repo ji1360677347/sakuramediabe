@@ -38,8 +38,24 @@ def list_ranking_board_items(
     page_size: int = 20,
     sort: str | None = Query(
         default=None,
-        description="排序表达式 field:direction，可选字段：rank、heat；direction 为 asc 或 desc",
+        description=(
+            "排序表达式 field:direction，可选字段：rank、heat、score、"
+            "score_number、watched_count、want_watch_count、comment_count；"
+            "direction 为 asc 或 desc"
+        ),
     ),
+    heat_min: int | None = Query(default=None, ge=0),
+    heat_max: int | None = Query(default=None, ge=0),
+    score_min: float | None = Query(default=None, ge=0),
+    score_max: float | None = Query(default=None, ge=0),
+    score_number_min: int | None = Query(default=None, ge=0),
+    score_number_max: int | None = Query(default=None, ge=0),
+    watched_count_min: int | None = Query(default=None, ge=0),
+    watched_count_max: int | None = Query(default=None, ge=0),
+    want_watch_count_min: int | None = Query(default=None, ge=0),
+    want_watch_count_max: int | None = Query(default=None, ge=0),
+    comment_count_min: int | None = Query(default=None, ge=0),
+    comment_count_max: int | None = Query(default=None, ge=0),
 ):
     return RankingCatalogService.list_board_items(
         source_key=source_key,
@@ -48,4 +64,16 @@ def list_ranking_board_items(
         page=page,
         page_size=page_size,
         sort=sort,
+        heat_min=heat_min,
+        heat_max=heat_max,
+        score_min=score_min,
+        score_max=score_max,
+        score_number_min=score_number_min,
+        score_number_max=score_number_max,
+        watched_count_min=watched_count_min,
+        watched_count_max=watched_count_max,
+        want_watch_count_min=want_watch_count_min,
+        want_watch_count_max=want_watch_count_max,
+        comment_count_min=comment_count_min,
+        comment_count_max=comment_count_max,
     )

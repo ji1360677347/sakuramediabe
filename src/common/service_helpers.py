@@ -262,6 +262,31 @@ def resolve_sort_expression(
     )
 
 
+def apply_numeric_range_filters(
+    query,
+    ranges: Sequence[tuple[str, Any, int | float | None, int | float | None]],
+    *,
+    error_code: str,
+):
+    """按 ``(字段名, 列, 下限, 上限)`` 依次应用数值范围条件。
+
+    影片列表和排行榜共用同一组互动数范围参数，min > max 统一在这里拒绝。
+    """
+    for name, field, minimum, maximum in ranges:
+        if minimum is not None and maximum is not None and minimum > maximum:
+            raise ApiError(
+                422,
+                error_code,
+                f"{name}_min 不能大于 {name}_max",
+                {f"{name}_min": minimum, f"{name}_max": maximum},
+            )
+        if minimum is not None:
+            query = query.where(field >= minimum)
+        if maximum is not None:
+            query = query.where(field <= maximum)
+    return query
+
+
 def playable_exists_expression():
     """返回"影片是否存在可播放媒体"的子查询表达式。"""
     from peewee import fn

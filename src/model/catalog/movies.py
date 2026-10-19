@@ -54,7 +54,7 @@ class Movie(TimestampedMixin, BaseModel):
     title = peewee.TextField(verbose_name="标题")
     release_date = peewee.DateTimeField(verbose_name="发布时间", index=True, null=True)
     duration_minutes = peewee.IntegerField(verbose_name="时长", default=0, index=True)
-    score = peewee.FloatField(verbose_name="评分", index=True, default=0)
+    score = peewee.FloatField(verbose_name="评分", default=0)
     score_number = peewee.IntegerField(verbose_name="评分人数", default=0)
     watched_count = peewee.IntegerField(default=0)
     cover_image = peewee.ForeignKeyField(
@@ -245,6 +245,25 @@ Movie.add_index(
         name="movie_subscribed_at_sort",
     )
 )
+# 互动数排序索引：字段均可空性为 false，等值排序直接用 DESC + id 稳定次级排序。
+for _sort_field, _sort_index_name in (
+    (Movie.heat, "movie_heat_sort"),
+    (Movie.score, "movie_score_sort"),
+    (Movie.score_number, "movie_score_number_sort"),
+    (Movie.watched_count, "movie_watched_count_sort"),
+    (Movie.want_watch_count, "movie_want_watch_count_sort"),
+    (Movie.comment_count, "movie_comment_count_sort"),
+):
+    Movie.add_index(
+        peewee.ModelIndex(
+            Movie,
+            (
+                peewee.Ordering(_sort_field, "DESC"),
+                peewee.Ordering(Movie.id, "DESC"),
+            ),
+            name=_sort_index_name,
+        )
+    )
 
 
 class MovieActor(BaseModel):

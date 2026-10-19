@@ -21,6 +21,7 @@ from src.common import (
 )
 from src.common.runtime_time import utc_now_for_db
 from src.common.service_helpers import (
+    apply_numeric_range_filters,
     build_ordered_expressions,
     find_movie_by_number,
     playable_exists_expression,
@@ -45,6 +46,7 @@ from src.model import (
     MovieSeries,
     MovieTag,
     Tag,
+    get_database,
 )
 from src.plugins.provider_protocol import (
     MEDIA_PROVIDER_REGISTRY,
@@ -60,6 +62,8 @@ from src.schema.catalog.movies import (
     MovieCollectionStatusResource,
     MovieCollectionType,
     MovieDetailResource,
+    MovieInteractionDistributionResource,
+    MovieInteractionFilterOptionsResource,
     MovieListItemResource,
     MovieListStatus,
     MovieMediaPointResource,
@@ -100,7 +104,9 @@ class MovieService:
         "added_at": Movie.id,
         "subscribed_at": Movie.subscribed_at,
         "comment_count": Movie.comment_count,
+        "score": Movie.score,
         "score_number": Movie.score_number,
+        "watched_count": Movie.watched_count,
         "want_watch_count": Movie.want_watch_count,
         "heat": Movie.heat,
     }
@@ -124,18 +130,21 @@ class MovieService:
         number_source: MovieNumberSource = MovieNumberSource.ALL,
         heat_min: int | None = None,
         heat_max: int | None = None,
+        score_min: float | None = None,
+        score_max: float | None = None,
+        score_number_min: int | None = None,
+        score_number_max: int | None = None,
+        watched_count_min: int | None = None,
+        watched_count_max: int | None = None,
+        want_watch_count_min: int | None = None,
+        want_watch_count_max: int | None = None,
+        comment_count_min: int | None = None,
+        comment_count_max: int | None = None,
         resolution: str | None = None,
         blacklisted: bool = False,
         search_terms: Sequence[str] = (),
     ):
         """构建影片列表的基础筛选链路，供列表和计数查询复用。"""
-        if heat_min is not None and heat_max is not None and heat_min > heat_max:
-            raise ApiError(
-                422,
-                "invalid_movie_filter",
-                "heat_min 不能大于 heat_max",
-                {"heat_min": heat_min, "heat_max": heat_max},
-            )
         if (
             actor_age_min is not None
             and actor_age_max is not None
@@ -262,10 +271,38 @@ class MovieService:
             filtered_query = filtered_query.where(Movie.movie_number.startswith("FC2"))
         elif number_source == MovieNumberSource.REGULAR:
             filtered_query = filtered_query.where(~(Movie.movie_number.startswith("FC2")))
-        if heat_min is not None:
-            filtered_query = filtered_query.where(Movie.heat >= heat_min)
-        if heat_max is not None:
-            filtered_query = filtered_query.where(Movie.heat <= heat_max)
+        filtered_query = apply_numeric_range_filters(
+            filtered_query,
+            (
+                ("heat", Movie.heat, heat_min, heat_max),
+                ("score", Movie.score, score_min, score_max),
+                (
+                    "score_number",
+                    Movie.score_number,
+                    score_number_min,
+                    score_number_max,
+                ),
+                (
+                    "watched_count",
+                    Movie.watched_count,
+                    watched_count_min,
+                    watched_count_max,
+                ),
+                (
+                    "want_watch_count",
+                    Movie.want_watch_count,
+                    want_watch_count_min,
+                    want_watch_count_max,
+                ),
+                (
+                    "comment_count",
+                    Movie.comment_count,
+                    comment_count_min,
+                    comment_count_max,
+                ),
+            ),
+            error_code="invalid_movie_filter",
+        )
         if resolution is not None:
             filtered_query = filtered_query.where(
                 resolution_exists_expression(resolution, error_code="invalid_movie_filter")
@@ -434,6 +471,16 @@ class MovieService:
         number_source: MovieNumberSource = MovieNumberSource.ALL,
         heat_min: int | None = None,
         heat_max: int | None = None,
+        score_min: float | None = None,
+        score_max: float | None = None,
+        score_number_min: int | None = None,
+        score_number_max: int | None = None,
+        watched_count_min: int | None = None,
+        watched_count_max: int | None = None,
+        want_watch_count_min: int | None = None,
+        want_watch_count_max: int | None = None,
+        comment_count_min: int | None = None,
+        comment_count_max: int | None = None,
         resolution: str | None = None,
         blacklisted: bool = False,
         search_terms: Sequence[str] = (),
@@ -456,6 +503,16 @@ class MovieService:
                 number_source=number_source,
                 heat_min=heat_min,
                 heat_max=heat_max,
+                score_min=score_min,
+                score_max=score_max,
+                score_number_min=score_number_min,
+                score_number_max=score_number_max,
+                watched_count_min=watched_count_min,
+                watched_count_max=watched_count_max,
+                want_watch_count_min=want_watch_count_min,
+                want_watch_count_max=want_watch_count_max,
+                comment_count_min=comment_count_min,
+                comment_count_max=comment_count_max,
                 resolution=resolution,
                 blacklisted=blacklisted,
                 search_terms=search_terms,
@@ -779,6 +836,16 @@ class MovieService:
         maker_name: str | None = None,
         heat_min: int | None = None,
         heat_max: int | None = None,
+        score_min: float | None = None,
+        score_max: float | None = None,
+        score_number_min: int | None = None,
+        score_number_max: int | None = None,
+        watched_count_min: int | None = None,
+        watched_count_max: int | None = None,
+        want_watch_count_min: int | None = None,
+        want_watch_count_max: int | None = None,
+        comment_count_min: int | None = None,
+        comment_count_max: int | None = None,
         resolution: str | None = None,
         blacklisted: bool = False,
         query: str | None = None,
@@ -801,6 +868,16 @@ class MovieService:
             number_source=number_source,
             heat_min=heat_min,
             heat_max=heat_max,
+            score_min=score_min,
+            score_max=score_max,
+            score_number_min=score_number_min,
+            score_number_max=score_number_max,
+            watched_count_min=watched_count_min,
+            watched_count_max=watched_count_max,
+            want_watch_count_min=want_watch_count_min,
+            want_watch_count_max=want_watch_count_max,
+            comment_count_min=comment_count_min,
+            comment_count_max=comment_count_max,
             resolution=resolution,
             blacklisted=blacklisted,
             search_terms=search_terms,
@@ -821,6 +898,16 @@ class MovieService:
                 number_source=number_source,
                 heat_min=heat_min,
                 heat_max=heat_max,
+                score_min=score_min,
+                score_max=score_max,
+                score_number_min=score_number_min,
+                score_number_max=score_number_max,
+                watched_count_min=watched_count_min,
+                watched_count_max=watched_count_max,
+                want_watch_count_min=want_watch_count_min,
+                want_watch_count_max=want_watch_count_max,
+                comment_count_min=comment_count_min,
+                comment_count_max=comment_count_max,
                 resolution=resolution,
                 blacklisted=blacklisted,
                 search_terms=search_terms,
@@ -832,6 +919,50 @@ class MovieService:
             page=page,
             page_size=page_size,
             total=total,
+        )
+
+    @staticmethod
+    def get_interaction_filter_options() -> MovieInteractionFilterOptionsResource:
+        """实时计算互动数分布，供前端滑块上限使用。"""
+        cursor = get_database().execute_sql(
+            """
+            SELECT COUNT(*) AS movie_count,
+              percentile_disc(0.999) WITHIN GROUP (ORDER BY heat) AS heat_p999,
+              MAX(heat) AS heat_max,
+              percentile_disc(0.999) WITHIN GROUP (ORDER BY score) AS score_p999,
+              MAX(score) AS score_max,
+              percentile_disc(0.999) WITHIN GROUP (ORDER BY score_number) AS score_number_p999,
+              MAX(score_number) AS score_number_max,
+              percentile_disc(0.999) WITHIN GROUP (ORDER BY watched_count) AS watched_count_p999,
+              MAX(watched_count) AS watched_count_max,
+              percentile_disc(0.999) WITHIN GROUP (ORDER BY want_watch_count) AS want_watch_count_p999,
+              MAX(want_watch_count) AS want_watch_count_max,
+              percentile_disc(0.999) WITHIN GROUP (ORDER BY comment_count) AS comment_count_p999,
+              MAX(comment_count) AS comment_count_max
+            FROM movie
+            WHERE is_blacklisted = FALSE
+            """
+        )
+        row = cursor.fetchone()
+        values = {
+            description[0]: value
+            for description, value in zip(cursor.description, row or ())
+        }
+
+        def distribution(prefix: str) -> MovieInteractionDistributionResource:
+            return MovieInteractionDistributionResource(
+                p999=values.get(f"{prefix}_p999"),
+                max=values.get(f"{prefix}_max"),
+            )
+
+        return MovieInteractionFilterOptionsResource(
+            movie_count=int(values.get("movie_count") or 0),
+            heat=distribution("heat"),
+            score=distribution("score"),
+            score_number=distribution("score_number"),
+            watched_count=distribution("watched_count"),
+            want_watch_count=distribution("want_watch_count"),
+            comment_count=distribution("comment_count"),
         )
 
     @staticmethod

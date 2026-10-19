@@ -45,6 +45,22 @@ class MovieReviewSort(str, Enum):
     HOTLY = "hotly"
 
 
+class MovieInteractionDistributionResource(SchemaModel):
+    # p999 表示 P99.9；评分等小数值保留 float，计数保留 int。
+    p999: int | float | None = None
+    max: int | float | None = None
+
+
+class MovieInteractionFilterOptionsResource(SchemaModel):
+    movie_count: int
+    heat: MovieInteractionDistributionResource
+    score: MovieInteractionDistributionResource
+    score_number: MovieInteractionDistributionResource
+    watched_count: MovieInteractionDistributionResource
+    want_watch_count: MovieInteractionDistributionResource
+    comment_count: MovieInteractionDistributionResource
+
+
 class MovieListItemResource(SchemaModel):
     # 影片主键：番号是对外主标识，但统一 action 协议的 resource_ids 收的是整数 id，
     # 所以影片卡片一律带上它，详情页与各列表页都能直接发起资源任务操作。

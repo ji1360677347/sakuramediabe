@@ -51,6 +51,9 @@ DETACH_USER_ASSET_IMAGES_MIGRATION_NAME = (
 VIEW_HISTORY_MIGRATION_NAME = "20261010_01_add_view_history"
 MEDIA_THUMBNAIL_ARCHIVE_MIGRATION_NAME = "20261014_01_add_media_thumbnail_archive"
 MOVIE_MEDIA_REPLACEMENT_MIGRATION_NAME = "20261014_02_add_movie_media_replacement"
+MOVIE_INTERACTION_SORT_INDEXES_MIGRATION_NAME = (
+    "20261019_01_add_movie_interaction_sort_indexes"
+)
 
 
 @dataclass(frozen=True)
