@@ -3,6 +3,9 @@ from loguru import logger
 
 from src.config import settings
 from src.model import (
+    FAVORITES_PLAYLIST_DESCRIPTION,
+    FAVORITES_PLAYLIST_NAME,
+    PLAYLIST_KIND_FAVORITES,
     PLAYLIST_KIND_RECENTLY_PLAYED,
     RECENTLY_PLAYED_PLAYLIST_DESCRIPTION,
     RECENTLY_PLAYED_PLAYLIST_NAME,
@@ -34,11 +37,13 @@ from src.model import (
     Movie,
     MovieActor,
     MoviePlotImage,
+    MovieRating,
     MovieSeries,
     MovieTag,
     Playlist,
     PlaylistMovie,
     RankingItem,
+    RatingDimension,
     SchemaMigration,
     Subtitle,
     SystemNotification,
@@ -69,6 +74,8 @@ def create_tables():
             MovieActor,
             MovieTag,
             MoviePlotImage,
+            MovieRating,
+            RatingDimension,
             Subtitle,
             VideoItem,
             VideoCollection,
@@ -125,8 +132,13 @@ def init_user() -> bool:
     return True
 
 
-# 系统播放列表预置清单：最近播放成员物化存储，由播放进度上报维护。
+# 系统播放列表预置清单：成员均物化存储在 playlist_movie，最近播放由进度上报维护。
 SYSTEM_PLAYLIST_SPECS = (
+    (
+        PLAYLIST_KIND_FAVORITES,
+        FAVORITES_PLAYLIST_NAME,
+        FAVORITES_PLAYLIST_DESCRIPTION,
+    ),
     (
         PLAYLIST_KIND_RECENTLY_PLAYED,
         RECENTLY_PLAYED_PLAYLIST_NAME,
@@ -135,13 +147,27 @@ SYSTEM_PLAYLIST_SPECS = (
 )
 
 
+def _system_playlist_name(name: str) -> str:
+    """系统列表名唯一；老库已有同名用户列表时追加序号，不覆盖用户数据。"""
+    candidate = name
+    suffix = 2
+    while Playlist.get_or_none(Playlist.name == candidate) is not None:
+        candidate = f"{name} {suffix}"
+        suffix += 1
+    return candidate
+
+
 def init_system_playlists() -> bool:
     """逐个幂等预置系统播放列表。"""
     created_any = False
     for kind, name, description in SYSTEM_PLAYLIST_SPECS:
         if Playlist.get_or_none(Playlist.kind == kind) is not None:
             continue
-        Playlist.create(kind=kind, name=name, description=description)
+        Playlist.create(
+            kind=kind,
+            name=_system_playlist_name(name),
+            description=description,
+        )
         logger.info("system playlist created kind={}", kind)
         created_any = True
     if not created_any:

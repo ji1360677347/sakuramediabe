@@ -54,6 +54,7 @@ MOVIE_MEDIA_REPLACEMENT_MIGRATION_NAME = "20261014_02_add_movie_media_replacemen
 MOVIE_INTERACTION_SORT_INDEXES_MIGRATION_NAME = (
     "20261019_01_add_movie_interaction_sort_indexes"
 )
+MOVIE_RATINGS_MIGRATION_NAME = "20261020_01_add_movie_ratings"
 
 
 @dataclass(frozen=True)

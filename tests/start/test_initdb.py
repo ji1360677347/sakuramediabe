@@ -4,6 +4,7 @@ import pytest
 from peewee import IntegrityError, ProgrammingError
 
 from src.model import (
+    PLAYLIST_KIND_FAVORITES,
     PLAYLIST_KIND_RECENTLY_PLAYED,
     Actor,
     BackgroundTaskRun,
@@ -390,7 +391,7 @@ def test_init_user_creates_single_account_once(clean_db, monkeypatch):
     assert User.select().count() == 1
 
 
-def test_init_system_playlists_creates_recently_played_once(clean_db, monkeypatch):
+def test_init_system_playlists_creates_system_playlists_once(clean_db, monkeypatch):
     create_tables()
 
     created = init_system_playlists()
@@ -400,23 +401,39 @@ def test_init_system_playlists_creates_recently_played_once(clean_db, monkeypatc
 
     assert created is True
     assert repeated is False
-    assert kinds == {PLAYLIST_KIND_RECENTLY_PLAYED}
+    assert kinds == {PLAYLIST_KIND_FAVORITES, PLAYLIST_KIND_RECENTLY_PLAYED}
+    assert Playlist.get(Playlist.kind == PLAYLIST_KIND_FAVORITES).name == "收藏"
     assert Playlist.get(Playlist.kind == PLAYLIST_KIND_RECENTLY_PLAYED).name == "最近播放"
-    assert Playlist.select().count() == 1
+    assert Playlist.select().count() == 2
 
 
-def test_init_system_playlists_does_not_restore_removed_kinds(clean_db, monkeypatch):
+def test_init_system_playlists_fills_missing_kinds_for_legacy_db(clean_db, monkeypatch):
     create_tables()
-    # 显式构造"老库仅有最近播放"的初始状态，不依赖建表后表为空。
+    # 老库只有最近播放，升级启动时应补出收藏列表。
     Playlist.delete().execute()
     Playlist.create(kind=PLAYLIST_KIND_RECENTLY_PLAYED, name="最近播放", description="")
 
     created = init_system_playlists()
 
     kinds = {playlist.kind for playlist in Playlist.select()}
-    assert created is False
-    assert kinds == {PLAYLIST_KIND_RECENTLY_PLAYED}
-    assert Playlist.select().count() == 1
+    assert created is True
+    assert kinds == {PLAYLIST_KIND_FAVORITES, PLAYLIST_KIND_RECENTLY_PLAYED}
+    assert Playlist.select().count() == 2
+
+
+def test_init_system_playlists_does_not_overwrite_same_name_user_playlist(
+    clean_db, monkeypatch
+):
+    create_tables()
+    user_playlist = Playlist.create(name="收藏")
+
+    created = init_system_playlists()
+
+    favorites = Playlist.get(Playlist.kind == PLAYLIST_KIND_FAVORITES)
+    assert created is True
+    assert user_playlist.name == "收藏"
+    assert favorites.name == "收藏 2"
+    assert favorites.description == "手动收藏的影片列表"
 
 
 def test_initdb_does_not_run_pending_migrations(monkeypatch):

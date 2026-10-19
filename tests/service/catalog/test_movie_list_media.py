@@ -160,18 +160,19 @@ def test_movie_media_queries_stay_constant_and_preserve_pagination(test_db):
             MovieActor.create(movie=movie, actor=actor)
             for copy in range(2):
                 Media.create(movie=movie, library=library, file_name=f"{i}-{copy}.mp4")
+    # list_movies 额外有一条批量 my_score 查询；其余列表不附带个人评分。
     loaders = [
-        MovieService.list_movies,
-        partial(MovieService.list_movies, actor_id=actor.id),
-        MovieService.list_latest_movies,
-        MovieService.list_subscribed_actor_latest_movies,
-        partial(MovieService.list_movies_by_series, series_id=series.id),
+        (MovieService.list_movies, 4),
+        (partial(MovieService.list_movies, actor_id=actor.id), 4),
+        (MovieService.list_latest_movies, 3),
+        (MovieService.list_subscribed_actor_latest_movies, 3),
+        (partial(MovieService.list_movies_by_series, series_id=series.id), 3),
     ]
-    for load in loaders:
+    for load, expected_query_count in loaders:
         for page_size in (1, 20, 100):
             with count_queries(only_select=True) as queries:
                 payload = load(page_size=page_size).model_dump(mode="json")
-            assert queries.count == 3
+            assert queries.count == expected_query_count
             assert payload["total"] == 100
             assert len(payload["items"]) == page_size
             assert all(item["media_count"] == 2 for item in payload["items"])

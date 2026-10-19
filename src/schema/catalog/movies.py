@@ -100,6 +100,13 @@ class MovieListItemResource(SchemaModel):
         return value
 
 
+class MovieListItemWithRatingResource(MovieListItemResource):
+    # 个人评分总分（1-5）；未评分保持 None，前端据此显示评分角标。
+    my_score: float | None = None
+    # 维度 id -> 分值；仅已评分列表（rated=true）填充，供紧凑列表展示维度摘要。
+    my_rating_values: dict[str, int] = Field(default_factory=dict)
+
+
 class SimilarMovieListItemResource(MovieListItemResource):
     similarity_score: float = 0.0
 
@@ -178,6 +185,7 @@ class MovieDetailResource(MovieListItemResource):
         default_factory=list
     )
     playlists: list[PlaylistSummaryResource] = Field(default_factory=list)
+    favorite_playlist_id: int | None = None
     rankings: list[MovieRankingResource] = Field(default_factory=list)
 
 

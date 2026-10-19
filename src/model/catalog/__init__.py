@@ -1,6 +1,7 @@
 from .actors import Actor
 from .images import Image
 from .movies import Movie, MovieActor, MoviePlotImage, MovieSeries, MovieTag, Subtitle
+from .ratings import MovieRating, RatingDimension
 from .tags import Tag
 from .view_history import (
     VIEW_HISTORY_ENTITY_ACTOR,
@@ -18,8 +19,10 @@ __all__ = [
     "Movie",
     "MovieActor",
     "MoviePlotImage",
+    "MovieRating",
     "MovieSeries",
     "MovieTag",
+    "RatingDimension",
     "Subtitle",
     "Tag",
     "ViewHistory",

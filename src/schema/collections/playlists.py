@@ -16,6 +16,7 @@ class PlaylistResource(SchemaModel):
     kind: str = PLAYLIST_KIND_CUSTOM
     description: str = ""
     is_system: bool
+    # 仅控制列表信息（改名/描述）是否可编辑；收藏的成员增删按 kind 单独判定。
     is_mutable: bool
     is_deletable: bool
     movie_count: int = 0

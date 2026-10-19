@@ -47,6 +47,7 @@ from src.start.migrations.runner import (
     MOVIE_COLLECTION_OWNER_MIGRATION_NAME,
     MOVIE_INTERACTION_SORT_INDEXES_MIGRATION_NAME,
     MOVIE_MEDIA_REPLACEMENT_MIGRATION_NAME,
+    MOVIE_RATINGS_MIGRATION_NAME,
     PLUGIN_COLLECTION_OWNERSHIP_MIGRATION_NAME,
     PLUGIN_MOVIE_METADATA_MIGRATION_NAME,
     REMOVE_GENERATED_THIN_COVER_MIGRATION_NAME,
@@ -148,6 +149,7 @@ def test_current_migrations_are_discoverable_in_order():
         MEDIA_THUMBNAIL_ARCHIVE_MIGRATION_NAME,
         MOVIE_MEDIA_REPLACEMENT_MIGRATION_NAME,
         MOVIE_INTERACTION_SORT_INDEXES_MIGRATION_NAME,
+        MOVIE_RATINGS_MIGRATION_NAME,
     ]
 
 
@@ -254,6 +256,7 @@ def test_run_pending_migrations_completes_fresh_current_schema_after_model_creat
         MigrationExecution(
             name=MOVIE_INTERACTION_SORT_INDEXES_MIGRATION_NAME, applied=True
         ),
+        MigrationExecution(name=MOVIE_RATINGS_MIGRATION_NAME, applied=True),
     ]
     assert _schema_migration_names(clean_db) == [
         CONSOLIDATED_MIGRATION_NAME,
@@ -287,6 +290,7 @@ def test_run_pending_migrations_completes_fresh_current_schema_after_model_creat
         MEDIA_THUMBNAIL_ARCHIVE_MIGRATION_NAME,
         MOVIE_MEDIA_REPLACEMENT_MIGRATION_NAME,
         MOVIE_INTERACTION_SORT_INDEXES_MIGRATION_NAME,
+        MOVIE_RATINGS_MIGRATION_NAME,
     ]
 
 
@@ -589,7 +593,7 @@ def test_consolidated_migration_upgrades_v0421_schema_and_preserves_required_mem
         SchemaMigration.create(name=CONSOLIDATED_MIGRATION_NAME)
     summary = run_pending_migrations(clean_db)
 
-    assert summary.applied_count == 30
+    assert summary.applied_count == 31
     assert clean_db.execute_sql(
         "SELECT interaction_synced_at FROM movie WHERE id = %s", (movie.id,)
     ).fetchone()[0] == datetime(2026, 8, 20, 1, 2, 3)

@@ -9,6 +9,7 @@ from .movie_subscription_service import MovieSubscriptionService
 from .movie_subtitle_service import MovieSubtitleService
 from .movie_task_service import MovieTaskService
 from .movie_thin_cover_backfill_service import MovieThinCoverBackfillService
+from .rating_service import RatingService
 from .subscribed_actor_movie_sync_service import SubscribedActorMovieSyncService
 from .tag_service import TagService
 from .view_history_service import ViewHistoryService
@@ -26,6 +27,7 @@ __all__ = [
     "MovieSubtitleService",
     "MovieTaskService",
     "MovieThinCoverBackfillService",
+    "RatingService",
     "SubscribedActorMovieSyncService",
     "TagService",
     "ViewHistoryService",

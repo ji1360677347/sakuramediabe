@@ -6,11 +6,16 @@ from src.model.mixins import TimestampedMixin
 
 PLAYLIST_KIND_CUSTOM = "custom"
 PLAYLIST_KIND_RECENTLY_PLAYED = "recently_played"
+PLAYLIST_KIND_FAVORITES = "favorites"
 RECENTLY_PLAYED_PLAYLIST_NAME = "最近播放"
 RECENTLY_PLAYED_PLAYLIST_DESCRIPTION = "系统自动维护的最近播放影片列表"
+FAVORITES_PLAYLIST_NAME = "收藏"
+FAVORITES_PLAYLIST_DESCRIPTION = "手动收藏的影片列表"
 
 # 系统播放列表的 kind 集合，作为 service / schema 判定"系统列表"的唯一真相源。
-SYSTEM_PLAYLIST_KINDS = frozenset({PLAYLIST_KIND_RECENTLY_PLAYED})
+SYSTEM_PLAYLIST_KINDS = frozenset(
+    {PLAYLIST_KIND_RECENTLY_PLAYED, PLAYLIST_KIND_FAVORITES}
+)
 
 
 class Playlist(TimestampedMixin, BaseModel):

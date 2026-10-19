@@ -99,7 +99,7 @@ class TagService:
         page_size: int = 20,
     ) -> PageResponse[MovieListItemResource]:
         cls.get_tag(tag_id)
-        return MovieService.list_movies(
+        page_result = MovieService.list_movies(
             tag_ids=[tag_id],
             years=years,
             status=status,
@@ -121,4 +121,8 @@ class TagService:
             comment_count_max=comment_count_max,
             page=page,
             page_size=page_size,
+        )
+        # list_movies 返回带个人评分的响应子类；标签列表沿用基础响应模型，丢弃评分字段。
+        return PageResponse[MovieListItemResource].model_validate(
+            page_result.model_dump()
         )

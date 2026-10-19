@@ -18,6 +18,7 @@ from src.schema.catalog.movies import (
     MovieDetailResource,
     MovieInteractionFilterOptionsResource,
     MovieListItemResource,
+    MovieListItemWithRatingResource,
     MovieListStatus,
     MovieMergedPlaybackResource,
     MovieMetadataImportRequest,
@@ -49,7 +50,7 @@ router = APIRouter(
 )
 
 
-@router.get("", response_model=PageResponse[MovieListItemResource])
+@router.get("", response_model=PageResponse[MovieListItemWithRatingResource])
 def list_movies(
     actor_id: int | None = None,
     actor_age_min: int | None = Query(default=None, ge=0),
@@ -78,6 +79,7 @@ def list_movies(
     resolution: str | None = Query(default=None),
     blacklisted: bool = False,
     query: str | None = Query(default=None),
+    rated: bool = Query(default=False),
     page: int = 1,
     page_size: int = 20,
 ):
@@ -112,6 +114,7 @@ def list_movies(
         comment_count_max=comment_count_max,
         resolution=resolution,
         blacklisted=blacklisted,
+        rated=rated,
         query=query,
         page=page,
         page_size=page_size,

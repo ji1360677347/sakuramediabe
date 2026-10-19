@@ -15,6 +15,12 @@ from src.api.exception.exception import (
 )
 from src.api.middleware.slow_requests import SlowRequestLoggingMiddleware
 from src.api.routers.catalog.actors import router as actors_router
+from src.api.routers.catalog.movie_ratings import (
+    dimensions_router as movie_rating_dimensions_router,
+)
+from src.api.routers.catalog.movie_ratings import (
+    ratings_router as movie_ratings_router,
+)
 from src.api.routers.catalog.movies import router as movies_router
 from src.api.routers.catalog.subscriptions import router as movie_subscriptions_router
 from src.api.routers.catalog.tags import router as tags_router
@@ -104,6 +110,8 @@ def create_app() -> FastAPI:
 
     app.include_router(actors_router)
     app.include_router(movies_router)
+    app.include_router(movie_rating_dimensions_router)
+    app.include_router(movie_ratings_router)
     app.include_router(movie_subscriptions_router)
     app.include_router(tags_router)
     app.include_router(view_history_router)

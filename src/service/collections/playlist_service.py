@@ -20,6 +20,9 @@ from src.common.service_helpers import (
     with_movie_card_relations,
 )
 from src.model import (
+    FAVORITES_PLAYLIST_NAME,
+    PLAYLIST_KIND_CUSTOM,
+    PLAYLIST_KIND_FAVORITES,
     PLAYLIST_KIND_RECENTLY_PLAYED,
     RECENTLY_PLAYED_PLAYLIST_DESCRIPTION,
     RECENTLY_PLAYED_PLAYLIST_NAME,
@@ -46,9 +49,10 @@ from src.service.catalog.movie_resolution_service import (
     resolution_level_expression,
 )
 
-# 系统列表内部展示次序：最近播放在前，自定义列表在后。
+# 系统列表内部展示次序：收藏在前，最近播放在后，自定义列表最后。
 _SYSTEM_KIND_ORDER = (
-    (PLAYLIST_KIND_RECENTLY_PLAYED, 0),
+    (PLAYLIST_KIND_FAVORITES, 0),
+    (PLAYLIST_KIND_RECENTLY_PLAYED, 1),
 )
 
 # 允许空值、排序时统一垫后的字段（added_at/bitrate 走子查询无媒体场景由 COALESCE 兜底，不参与垫后）。
@@ -59,7 +63,9 @@ class PlaylistService:
     """聚合播放列表查询、名称校验和最近播放维护逻辑。"""
 
     SYSTEM_KINDS = set(SYSTEM_PLAYLIST_KINDS)
-    RESERVED_NAMES = {RECENTLY_PLAYED_PLAYLIST_NAME}
+    # 成员可由用户增删的列表：自定义列表 + 系统收藏；最近播放由播放进度维护。
+    MEMBER_MUTABLE_KINDS = {PLAYLIST_KIND_CUSTOM, PLAYLIST_KIND_FAVORITES}
+    RESERVED_NAMES = {RECENTLY_PLAYED_PLAYLIST_NAME, FAVORITES_PLAYLIST_NAME}
 
     @staticmethod
     def _playlist_system_order():
@@ -188,6 +194,19 @@ class PlaylistService:
             )
         return playlist
 
+    @classmethod
+    def _require_member_mutable_playlist(cls, playlist_id: int) -> Playlist:
+        """允许自定义列表和收藏增删影片；最近播放仍由系统维护。"""
+        playlist = cls._require_playlist(playlist_id)
+        if playlist.kind not in cls.MEMBER_MUTABLE_KINDS:
+            raise ApiError(
+                409,
+                "playlist_managed_by_system",
+                "Playlist is managed by system",
+                {"playlist_id": playlist.id},
+            )
+        return playlist
+
     @staticmethod
     def _require_movie(movie_number: str) -> Movie:
         return require_record(
@@ -217,6 +236,11 @@ class PlaylistService:
             name=RECENTLY_PLAYED_PLAYLIST_NAME,
             description=RECENTLY_PLAYED_PLAYLIST_DESCRIPTION,
         )
+
+    @staticmethod
+    def get_system_playlist_id(kind: str) -> int | None:
+        playlist = Playlist.get_or_none(Playlist.kind == kind)
+        return None if playlist is None else playlist.id
 
     @classmethod
     def list_playlists(cls, include_system: bool = True) -> list[PlaylistResource]:
@@ -383,7 +407,7 @@ class PlaylistService:
 
     @classmethod
     def add_movie_to_playlist(cls, playlist_id: int, movie_number: str) -> None:
-        playlist = cls._require_custom_playlist(playlist_id)
+        playlist = cls._require_member_mutable_playlist(playlist_id)
         movie = cls._require_movie(movie_number)
         touched_at = utc_now_for_db()
         playlist_movie = PlaylistMovie.get_or_none(
@@ -405,7 +429,7 @@ class PlaylistService:
 
     @classmethod
     def remove_movie_from_playlist(cls, playlist_id: int, movie_number: str) -> None:
-        playlist = cls._require_custom_playlist(playlist_id)
+        playlist = cls._require_member_mutable_playlist(playlist_id)
         movie = Movie.get_or_none(Movie.movie_number == movie_number)
         if movie is None:
             return

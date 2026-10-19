@@ -34,6 +34,7 @@ from src.metadata._providers.models import JavdbMovieReviewResource
 from src.metadata.factory import build_javdb_provider
 from src.metadata.provider import MetadataNotFoundError, MetadataRequestError
 from src.model import (
+    PLAYLIST_KIND_FAVORITES,
     Actor,
     Image,
     Media,
@@ -43,8 +44,10 @@ from src.model import (
     Movie,
     MovieActor,
     MoviePlotImage,
+    MovieRating,
     MovieSeries,
     MovieTag,
+    RatingDimension,
     Tag,
     get_database,
 )
@@ -65,6 +68,7 @@ from src.schema.catalog.movies import (
     MovieInteractionDistributionResource,
     MovieInteractionFilterOptionsResource,
     MovieListItemResource,
+    MovieListItemWithRatingResource,
     MovieListStatus,
     MovieMediaPointResource,
     MovieMediaProgressResource,
@@ -83,6 +87,7 @@ from src.schema.common.pagination import PageResponse
 from src.service.catalog.movie_list_media_service import attach_movie_list_media
 from src.service.catalog.movie_ownership_gateway import MovieOwnershipGateway
 from src.service.catalog.movie_resolution_service import resolution_exists_expression
+from src.service.catalog.rating_service import RatingService
 from src.service.collections import PlaylistService
 from src.service.discovery.ranking_service import RankingCatalogService
 from src.service.playback.provider_helpers import library_handle_for, media_handle_for
@@ -98,7 +103,7 @@ class MovieService:
 
     FEMALE_GENDER = 1
 
-    MOVIE_LIST_NULLABLE_SORT_FIELDS = {"release_date", "subscribed_at"}
+    MOVIE_LIST_NULLABLE_SORT_FIELDS = {"release_date", "subscribed_at", "my_score"}
     MOVIE_LIST_SORT_FIELD_MAP = {
         "release_date": Movie.release_date,
         "added_at": Movie.id,
@@ -109,6 +114,7 @@ class MovieService:
         "watched_count": Movie.watched_count,
         "want_watch_count": Movie.want_watch_count,
         "heat": Movie.heat,
+        "my_score": MovieRating.total_score,
     }
 
     _playable_exists_expression = staticmethod(playable_exists_expression)
@@ -142,6 +148,7 @@ class MovieService:
         comment_count_max: int | None = None,
         resolution: str | None = None,
         blacklisted: bool = False,
+        rated: bool = False,
         search_terms: Sequence[str] = (),
     ):
         """构建影片列表的基础筛选链路，供列表和计数查询复用。"""
@@ -177,6 +184,8 @@ class MovieService:
                 {"year": years},
             )
         query = Movie.select().where(Movie.is_blacklisted == blacklisted)
+        if rated:
+            query = query.where(Movie.id.in_(RatingService.rated_movie_ids()))
         if actor_id is None:
             filtered_query = query
         else:
@@ -430,9 +439,50 @@ class MovieService:
         """查询影片最近一次本地媒体入库时间，供可播放列表按媒体入库排序。"""
         return Media.select(fn.MAX(Media.created_at)).where(Media.movie == Movie.movie_number)
 
+    @staticmethod
+    def _parse_rating_dimension_sort(sort: str | None) -> list | None:
+        """``dimension_<id>:direction`` 按单个评分维度排序；不是该形态时返回 None。"""
+        normalized = (sort or "").strip().lower()
+        if not normalized.startswith("dimension_"):
+            return None
+        field_name, _, direction = normalized.partition(":")
+        dimension_id_text = field_name.removeprefix("dimension_")
+        if direction not in ("asc", "desc") or not dimension_id_text.isdigit():
+            raise ApiError(
+                422,
+                "invalid_movie_filter",
+                "Invalid sort expression",
+                {"sort": sort},
+            )
+        dimension_id = int(dimension_id_text)
+        if not RatingDimension.select(RatingDimension.id).where(
+            RatingDimension.id == dimension_id
+        ).exists():
+            raise ApiError(
+                422,
+                "invalid_movie_filter",
+                "Invalid sort expression",
+                {"sort": sort},
+            )
+        return build_ordered_expressions(
+            RatingService.dimension_score_expression(dimension_id),
+            direction,
+            nullable=True,
+            tie_breaker=Movie.id,
+        )
+
+    @staticmethod
+    def _needs_rating_join(sort: str | None) -> bool:
+        """评分排序需要把 MovieRating LEFT JOIN 进影片查询，避免逐行相关子查询。"""
+        normalized = (sort or "").strip().lower()
+        return normalized.startswith(("my_score:", "dimension_"))
+
     @classmethod
     def _build_movie_list_sort(cls, sort: str | None, status: MovieListStatus = MovieListStatus.ALL) -> Sequence:
         """解析 ``field:direction`` 排序表达式，并补上稳定的次级排序。"""
+        dimension_sort = cls._parse_rating_dimension_sort(sort)
+        if dimension_sort is not None:
+            return dimension_sort
         def _added_at_order(field_name: str, direction: str) -> list:
             # 可播放态按最近媒体入库时间排序：以媒体粒度子查询为排序列。
             return build_ordered_expressions(
@@ -483,6 +533,7 @@ class MovieService:
         comment_count_max: int | None = None,
         resolution: str | None = None,
         blacklisted: bool = False,
+        rated: bool = False,
         search_terms: Sequence[str] = (),
     ):
         """列表查询统一在这里补齐封面图和 ``can_play`` 计算列。"""
@@ -515,9 +566,16 @@ class MovieService:
                 comment_count_max=comment_count_max,
                 resolution=resolution,
                 blacklisted=blacklisted,
+                rated=rated,
                 search_terms=search_terms,
             ).select(Movie, can_play_expression)
         )
+        if cls._needs_rating_join(sort):
+            query = query.switch(Movie).join(
+                MovieRating,
+                JOIN.LEFT_OUTER,
+                on=(MovieRating.movie == Movie.id),
+            )
         if search_terms and (sort is None or not sort.strip()):
             order_by = cls._build_movie_search_sort(search_terms)
         else:
@@ -816,6 +874,9 @@ class MovieService:
         movie.media_count = len(movie.media_items)
         movie.merge_playback_candidates = MovieService._merge_playback_candidates(movie)
         movie.playlists = PlaylistService.list_movie_playlists(movie)
+        movie.favorite_playlist_id = PlaylistService.get_system_playlist_id(
+            PLAYLIST_KIND_FAVORITES
+        )
         movie.rankings = RankingCatalogService.list_movie_rankings(movie.id)
         movie.can_play = any(media_item.valid for media_item in movie.media_items)
         return MovieDetailResource.from_attributes_model(movie)
@@ -848,10 +909,11 @@ class MovieService:
         comment_count_max: int | None = None,
         resolution: str | None = None,
         blacklisted: bool = False,
+        rated: bool = False,
         query: str | None = None,
         page: int = 1,
         page_size: int = 20,
-    ) -> PageResponse[MovieListItemResource]:
+    ) -> PageResponse[MovieListItemWithRatingResource]:
         start = max(page - 1, 0) * page_size
         search_terms = split_search_terms(query, error_code="invalid_movie_filter")
         total = MovieService._filtered_movies(
@@ -880,6 +942,7 @@ class MovieService:
             comment_count_max=comment_count_max,
             resolution=resolution,
             blacklisted=blacklisted,
+            rated=rated,
             search_terms=search_terms,
         ).count()
         movies = list(
@@ -910,12 +973,14 @@ class MovieService:
                 comment_count_max=comment_count_max,
                 resolution=resolution,
                 blacklisted=blacklisted,
+                rated=rated,
                 search_terms=search_terms,
             ).offset(start).limit(page_size)
         )
         attach_movie_list_media(movies)
-        return PageResponse[MovieListItemResource](
-            items=MovieListItemResource.from_items(movies),
+        RatingService.attach_movie_scores(movies, include_values=rated)
+        return PageResponse[MovieListItemWithRatingResource](
+            items=MovieListItemWithRatingResource.from_items(movies),
             page=page,
             page_size=page_size,
             total=total,
