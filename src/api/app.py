@@ -43,6 +43,7 @@ from src.api.routers.discovery.moment_recommendations import (
     router as moment_recommendations_router,
 )
 from src.api.routers.discovery.ranking_sources import router as ranking_sources_router
+from src.api.routers.discovery.taste_profile import router as taste_profile_router
 from src.api.routers.files.images import router as file_images_router
 from src.api.routers.files.subtitles import router as file_subtitles_router
 from src.api.routers.playback.media import router as media_router
@@ -128,6 +129,7 @@ def create_app() -> FastAPI:
     app.include_router(hot_actress_releases_router)
     app.include_router(image_search_router)
     app.include_router(moment_recommendations_router)
+    app.include_router(taste_profile_router)
     app.include_router(ranking_sources_router)
     app.include_router(downloads_router)
     app.include_router(media_import_router)

@@ -10,7 +10,7 @@ from src.api.exception.exception import api_error_handler
 from src.api.routers import deps
 from src.api.routers.catalog import subscriptions as movie_subscriptions
 from src.api.routers.catalog import tags, view_history
-from src.api.routers.discovery import image_search, ranking_sources
+from src.api.routers.discovery import image_search, ranking_sources, taste_profile
 from src.api.routers.discovery.hot_actress_releases import (
     router as hot_actress_releases_router,
 )
@@ -50,6 +50,7 @@ from src.api.routers.videos import items as video_items
         (image_search.router, (deps.db_deps, deps.get_current_user)),
         (hot_actress_releases_router, (deps.db_deps, deps.get_current_user)),
         (ranking_sources.router, (deps.db_deps, deps.get_current_user)),
+        (taste_profile.router, (deps.db_deps, deps.get_current_user)),
         (tags.router, (deps.db_deps, deps.get_current_user)),
         (view_history.router, (deps.db_deps, deps.get_current_user)),
         (movie_subscriptions.router, (deps.db_deps, deps.get_current_user)),
@@ -170,6 +171,7 @@ def test_create_app_registers_image_search_routes():
     assert "/moment-recommendations" in paths
     assert "/hot-reviews" not in paths
     assert "/hot-actress-releases" in paths
+    assert "/taste-profile" in paths
     assert "/ranking-sources" in paths
     assert "/ranking-sources/{source_key}/boards" in paths
     assert "/ranking-sources/{source_key}/boards/{board_key}/items" in paths

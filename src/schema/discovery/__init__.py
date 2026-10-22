@@ -16,6 +16,11 @@ from .rankings import (
     RankingBoardResource,
     RankingSourceResource,
 )
+from .taste_profile import (
+    TasteProfileActressResource,
+    TasteProfileResource,
+    TasteProfileTagResource,
+)
 
 __all__ = [
     "DailyRecommendationMovieResource",
@@ -31,4 +36,7 @@ __all__ = [
     "RankingBoardItemsResource",
     "RankingBoardResource",
     "RankingSourceResource",
+    "TasteProfileActressResource",
+    "TasteProfileResource",
+    "TasteProfileTagResource",
 ]

@@ -18,6 +18,7 @@ from .qdrant_thumbnail_store import (
 )
 from .ranking_service import RankingCatalogService, RankingSyncService
 from .recommendation_service import MovieRecommendationService
+from .taste_profile_service import TasteProfileService
 
 __all__ = [
     "DailyRecommendationService",
@@ -31,6 +32,7 @@ __all__ = [
     "QdrantThumbnailStore",
     "RankingCatalogService",
     "RankingSyncService",
+    "TasteProfileService",
     "ThumbnailVectorRecord",
     "ThumbnailVectorSearchHit",
     "get_embedding_client",
