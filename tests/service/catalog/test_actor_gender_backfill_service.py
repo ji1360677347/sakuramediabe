@@ -129,7 +129,7 @@ def test_backfill_corrects_both_directions_and_marks_checked(test_db):
     assert "movie-COMPLETE" not in provider.calls
 
 
-def test_backfill_batch_limit_and_resume(test_db):
+def test_backfill_runs_all_batches_in_one_run(test_db):
     actors = [
         _create_actor(f"male-{index}", gender=1) for index in range(3)
     ]
@@ -142,25 +142,18 @@ def test_backfill_batch_limit_and_resume(test_db):
     for index, actor in enumerate(actors, 1):
         _link(_create_movie(f"{index}"), actor)
 
-    service = ActorGenderBackfillService(
+    stats = ActorGenderBackfillService(
         provider=provider, batch_size=2, request_interval=0
-    )
+    ).run()
 
-    first = service.run()
-    assert first["candidates"] == 2
-    assert first["corrected"] == 2
+    assert stats["candidates"] == 3
+    assert stats["corrected"] == 3
+    assert len(provider.calls) == 3
 
     second = ActorGenderBackfillService(
         provider=provider, batch_size=2, request_interval=0
     ).run()
-    assert second["candidates"] == 1
-    assert second["corrected"] == 1
-
-    third = ActorGenderBackfillService(
-        provider=provider, batch_size=2, request_interval=0
-    ).run()
-    assert third["candidates"] == 0
-    assert len(provider.calls) == 3
+    assert second["candidates"] == 0
 
 
 def test_backfill_marks_unresolved_and_does_not_retry(test_db):

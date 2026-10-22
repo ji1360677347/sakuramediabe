@@ -78,7 +78,7 @@ BUILTIN_JOB_REGISTRY: list[JobDefinition] = [
         log_name="actor-gender-backfill",
         cli_name="backfill-actor-genders",
         cli_help="按影片元数据修正演员性别",
-        cron_setting="actor_gender_backfill_cron",
+        manual_only=True,
         handler=lambda reporter, _params: ActorGenderBackfillService().run(reporter=reporter),
     ),
     JobDefinition(

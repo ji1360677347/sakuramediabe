@@ -21,8 +21,8 @@ class ActorGenderBackfillService:
     """按 JavDB 影片详情的演员性别，修正存量错误性别。
 
     当前 JavDB 演员详情和搜索接口实测都不返回性别，只有影片详情的 actors[].gender
-    可靠；任务分批执行，gender_checked_at 逐行持久化，请求失败写 gender_next_check_at
-    退避，中断后从剩余候选继续。
+    可靠；手动任务一次处理完所有候选，内部分批只是限制单次采样查询量，
+    gender_checked_at 逐行持久化，请求失败写 gender_next_check_at 退避，中断后从剩余候选继续。
     """
 
     TASK_KEY = "actor_gender_backfill"
@@ -69,54 +69,59 @@ class ActorGenderBackfillService:
         if not candidates:
             return stats
 
-        samples = self._sample_movies([actor.id for actor in candidates])
         provider = self.provider or build_javdb_provider()
         metadata_provider = getattr(provider, "provider", provider)
         checked_at = utc_now_for_db()
         retry_at = checked_at + timedelta(hours=self.RETRY_AFTER_HOURS)
 
         try:
-            for current, actor in enumerate(candidates, 1):
-                try:
-                    detected = self._detect_gender(
-                        actor, samples.get(actor.id, ()), metadata_provider
-                    )
-                except MetadataRequestError as exc:
-                    stats["errors"] += 1
-                    Actor.update(gender_next_check_at=retry_at).where(
-                        Actor.id == actor.id
-                    ).execute()
-                    logger.warning(
-                        "演员性别回填请求失败 actor_id={} name={} detail={} errors={}/{}",
-                        actor.id,
-                        actor.name,
-                        exc,
-                        stats["errors"],
-                        self.MAX_BATCH_ERRORS,
-                    )
-                    if stats["errors"] >= self.MAX_BATCH_ERRORS:
-                        stats["aborted"] = 1
-                        break
-                    self._emit(reporter, current, len(candidates), stats)
-                    continue
+            for batch_start in range(0, len(candidates), self.batch_size):
+                batch = candidates[batch_start : batch_start + self.batch_size]
+                samples = self._sample_movies([actor.id for actor in batch])
+                for offset, actor in enumerate(batch, 1):
+                    current = batch_start + offset
+                    try:
+                        detected = self._detect_gender(
+                            actor, samples.get(actor.id, ()), metadata_provider
+                        )
+                    except MetadataRequestError as exc:
+                        stats["errors"] += 1
+                        Actor.update(gender_next_check_at=retry_at).where(
+                            Actor.id == actor.id
+                        ).execute()
+                        logger.warning(
+                            "演员性别回填请求失败 actor_id={} name={} detail={} errors={}/{}",
+                            actor.id,
+                            actor.name,
+                            exc,
+                            stats["errors"],
+                            self.MAX_BATCH_ERRORS,
+                        )
+                        if stats["errors"] >= self.MAX_BATCH_ERRORS:
+                            stats["aborted"] = 1
+                            break
+                        self._emit(reporter, current, len(candidates), stats)
+                        continue
 
-                if detected is None:
-                    stats["unresolved"] += 1
-                elif detected == actor.gender:
-                    stats["unchanged"] += 1
-                elif ActorOwnershipGateway.update_host_source(
-                    actor.id, {"gender": detected}
-                ):
-                    stats["corrected"] += 1
-                else:
-                    stats["blocked"] += 1
-                Actor.update(
-                    gender_checked_at=checked_at,
-                    gender_next_check_at=None,
-                ).where(Actor.id == actor.id).execute()
-                self._emit(reporter, current, len(candidates), stats)
-                if self.request_interval > 0:
-                    time.sleep(self.request_interval)
+                    if detected is None:
+                        stats["unresolved"] += 1
+                    elif detected == actor.gender:
+                        stats["unchanged"] += 1
+                    elif ActorOwnershipGateway.update_host_source(
+                        actor.id, {"gender": detected}
+                    ):
+                        stats["corrected"] += 1
+                    else:
+                        stats["blocked"] += 1
+                    Actor.update(
+                        gender_checked_at=checked_at,
+                        gender_next_check_at=None,
+                    ).where(Actor.id == actor.id).execute()
+                    self._emit(reporter, current, len(candidates), stats)
+                    if self.request_interval > 0:
+                        time.sleep(self.request_interval)
+                if stats["aborted"]:
+                    break
         finally:
             if self.provider is None:
                 client = getattr(provider, "client", None)
@@ -126,7 +131,7 @@ class ActorGenderBackfillService:
         if stats["aborted"]:
             logger.error("演员性别回填中断 stats={}", stats)
             raise RuntimeError(
-                f"演员性别回填连续失败 {stats['errors']} 个演员，本轮已中断"
+                f"演员性别回填累计失败 {stats['errors']} 个演员，本轮已中断"
             )
         logger.info("演员性别回填完成 stats={}", stats)
         return stats
@@ -148,7 +153,6 @@ class ActorGenderBackfillService:
                 fn.COUNT(MovieActor.id).desc(),
                 Actor.id.asc(),
             )
-            .limit(self.batch_size)
         )
 
     def _pending_recheck(self):
@@ -164,7 +168,6 @@ class ActorGenderBackfillService:
                 | (Actor.gender_next_check_at <= now),
             )
             .order_by(fn.COUNT(MovieActor.id).desc(), Actor.id.asc())
-            .limit(self.batch_size)
         )
 
     @classmethod
