@@ -169,6 +169,10 @@ class ActorMergeService:
             params.append(json.dumps(owner_updates, ensure_ascii=False))
         if field_updates:
             assignments.append("mutation_revision = mutation_revision + 1")
+        if "gender" in field_updates:
+            # 合并可能把源演员的旧性别带给目标；让回填重新评估。
+            assignments.append("gender_checked_at = NULL")
+            assignments.append("gender_next_check_at = NULL")
         if profile_image_id != target.profile_image_id:
             assignments.append("profile_image_id = %s")
             params.append(profile_image_id)

@@ -11,6 +11,7 @@ from src.scheduler.queue_tasks import (
 )
 from src.scheduler.ranking_plugin_adapter import apply_plugin_ranking_sources
 from src.service.catalog import (
+    ActorGenderBackfillService,
     MovieHeatService,
     MovieInteractionSyncService,
     MovieTaskService,
@@ -71,6 +72,14 @@ BUILTIN_JOB_REGISTRY: list[JobDefinition] = [
         cli_help="尝试从 JavDB 补录插件影片",
         cron_setting="movie_javdb_backfill_cron",
         handler=lambda reporter, _params: MovieJavdbBackfillService().run(reporter=reporter),
+    ),
+    JobDefinition(
+        task_key=ActorGenderBackfillService.TASK_KEY,
+        log_name="actor-gender-backfill",
+        cli_name="backfill-actor-genders",
+        cli_help="按影片元数据修正演员性别",
+        cron_setting="actor_gender_backfill_cron",
+        handler=lambda reporter, _params: ActorGenderBackfillService().run(reporter=reporter),
     ),
     JobDefinition(
         task_key="actor_subscription_sync",

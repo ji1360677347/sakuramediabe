@@ -3,6 +3,7 @@ from datetime import date, datetime
 import pytest
 
 from src.api.exception.errors import ApiError
+from src.common.runtime_time import utc_now_for_db
 from src.model import Actor, Image, Movie, MovieActor
 from src.service.catalog import ActorMergeService, ActorService, MovieService
 from src.service.system.status_service import StatusService
@@ -95,6 +96,29 @@ def test_merge_gap_fills_profile_and_skips_manual_source_fields(test_db):
     assert merged.cup == "F"
     assert merged.field_owners.get("height_cm") == "host:javdb"
     assert merged.mutation_revision == 1
+
+
+def test_merge_copied_gender_clears_backfill_state(test_db):
+    checked_at = utc_now_for_db()
+    target = Actor.create(
+        javdb_id="merge-gender-target",
+        name="保留",
+        gender=0,
+        gender_checked_at=checked_at,
+        gender_next_check_at=checked_at,
+    )
+    source = Actor.create(
+        javdb_id="merge-gender-source",
+        name="来源",
+        gender=1,
+    )
+
+    ActorMergeService.merge_actors(target.id, [source.id])
+
+    merged = Actor.get_by_id(target.id)
+    assert merged.gender == 1
+    assert merged.gender_checked_at is None
+    assert merged.gender_next_check_at is None
 
 
 def test_merge_takes_over_source_image_only_when_target_has_none(test_db):

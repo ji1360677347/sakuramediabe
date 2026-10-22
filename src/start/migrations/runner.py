@@ -55,6 +55,7 @@ MOVIE_INTERACTION_SORT_INDEXES_MIGRATION_NAME = (
     "20261019_01_add_movie_interaction_sort_indexes"
 )
 MOVIE_RATINGS_MIGRATION_NAME = "20261020_01_add_movie_ratings"
+ACTOR_GENDER_CHECKED_AT_MIGRATION_NAME = "20261023_01_add_actor_gender_checked_at"
 
 
 @dataclass(frozen=True)

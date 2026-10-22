@@ -23,6 +23,7 @@ from src.model import (
 from src.start.commands import main
 from src.start.migrations.runner import (
     ACTOR_GENDER_BACKFILL_MIGRATION_NAME,
+    ACTOR_GENDER_CHECKED_AT_MIGRATION_NAME,
     ACTOR_LOCAL_PROFILE_MIGRATION_NAME,
     ACTOR_MERGED_INTO_MIGRATION_NAME,
     ACTOR_METADATA_MIGRATION_NAME,
@@ -150,6 +151,7 @@ def test_current_migrations_are_discoverable_in_order():
         MOVIE_MEDIA_REPLACEMENT_MIGRATION_NAME,
         MOVIE_INTERACTION_SORT_INDEXES_MIGRATION_NAME,
         MOVIE_RATINGS_MIGRATION_NAME,
+        ACTOR_GENDER_CHECKED_AT_MIGRATION_NAME,
     ]
 
 
@@ -257,6 +259,7 @@ def test_run_pending_migrations_completes_fresh_current_schema_after_model_creat
             name=MOVIE_INTERACTION_SORT_INDEXES_MIGRATION_NAME, applied=True
         ),
         MigrationExecution(name=MOVIE_RATINGS_MIGRATION_NAME, applied=True),
+        MigrationExecution(name=ACTOR_GENDER_CHECKED_AT_MIGRATION_NAME, applied=True),
     ]
     assert _schema_migration_names(clean_db) == [
         CONSOLIDATED_MIGRATION_NAME,
@@ -291,7 +294,27 @@ def test_run_pending_migrations_completes_fresh_current_schema_after_model_creat
         MOVIE_MEDIA_REPLACEMENT_MIGRATION_NAME,
         MOVIE_INTERACTION_SORT_INDEXES_MIGRATION_NAME,
         MOVIE_RATINGS_MIGRATION_NAME,
+        ACTOR_GENDER_CHECKED_AT_MIGRATION_NAME,
     ]
+
+
+def test_actor_gender_checked_at_migration_adds_columns_idempotently_and_preserves_rows(
+    clean_db,
+):
+    clean_db.create_tables(TEST_MODELS)
+    existing = Actor.create(javdb_id="migration-gender", name="保留")
+    _drop_columns(clean_db, "actor", ("gender_checked_at", "gender_next_check_at"))
+
+    migration = _load_migration_module(
+        Path(f"{ACTOR_GENDER_CHECKED_AT_MIGRATION_NAME}.py")
+    )
+    migration.migrate(clean_db)
+    migration.migrate(clean_db)
+
+    column_names = _column_names(clean_db, "actor")
+    assert "gender_checked_at" in column_names
+    assert "gender_next_check_at" in column_names
+    assert Actor.get_by_id(existing.id).name == "保留"
 
 
 def test_download_task_remote_seen_migration_backfills_existing_rows(clean_db):
@@ -593,7 +616,7 @@ def test_consolidated_migration_upgrades_v0421_schema_and_preserves_required_mem
         SchemaMigration.create(name=CONSOLIDATED_MIGRATION_NAME)
     summary = run_pending_migrations(clean_db)
 
-    assert summary.applied_count == 31
+    assert summary.applied_count == 32
     assert clean_db.execute_sql(
         "SELECT interaction_synced_at FROM movie WHERE id = %s", (movie.id,)
     ).fetchone()[0] == datetime(2026, 8, 20, 1, 2, 3)

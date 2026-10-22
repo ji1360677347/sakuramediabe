@@ -1,3 +1,4 @@
+from .actor_gender_backfill_service import ActorGenderBackfillService
 from .actor_merge_service import ActorMergeService
 from .actor_service import ActorService
 from .catalog_import_service import CatalogImportService, ImageDownloadError
@@ -15,6 +16,7 @@ from .tag_service import TagService
 from .view_history_service import ViewHistoryService
 
 __all__ = [
+    "ActorGenderBackfillService",
     "ActorMergeService",
     "ActorService",
     "CatalogImportService",

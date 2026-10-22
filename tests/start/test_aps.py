@@ -58,6 +58,7 @@ def test_aps_command_invokes_scheduler_entrypoint(monkeypatch):
         "generate-moment-recommendations",
         "auto-download-subscribed-movies",
         "backfill-media-video-info",
+        "backfill-actor-genders",
     ],
 )
 def test_aps_cli_commands_run_job(monkeypatch, cli_name):
@@ -251,6 +252,7 @@ def test_build_scheduler_registers_all_jobs(monkeypatch):
     assert str(scheduler.get_job("download_task_sync").trigger) == "cron[month='*', day='*', day_of_week='*', hour='*', minute='*/15']"
     assert str(scheduler.get_job("download_task_auto_import").trigger) == "cron[month='*', day='*', day_of_week='*', hour='*', minute='*/10']"
     assert str(scheduler.get_job("media_file_hash_backfill").trigger) == "cron[month='*', day='*', day_of_week='*', hour='3', minute='0']"
+    assert str(scheduler.get_job("actor_gender_backfill").trigger) == "cron[month='*', day='*', day_of_week='*', hour='*', minute='15']"
     assert str(scheduler.get_job("media_file_scan").trigger) == "cron[month='*', day='*', day_of_week='*', hour='*/6', minute='0']"
     assert str(scheduler.get_job("media_thumbnail_generation").trigger) == "cron[month='*', day='*', day_of_week='*', hour='*', minute='*/5']"
     assert str(scheduler.get_job("image_search_index").trigger) == "cron[month='*', day='*', day_of_week='*', hour='*', minute='*/10']"
