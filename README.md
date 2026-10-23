@@ -18,3 +18,9 @@ SakuraMediaBE 是 SakuraMedia 的服务端项目，负责提供媒体库管理�
 * 若用户不同意上述条款任意一条，请勿使用本软件
 
 如有侵权，请邮箱联系 tinyping@protonmail.com
+
+## License
+
+本项目采用 [PolyForm Noncommercial License 1.0.0](./LICENSE)，仅允许非商业用途。
+
+Copyright (C) 2026 tinypinglite

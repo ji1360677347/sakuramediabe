@@ -4,6 +4,7 @@ version = "0.1.0"
 description = ""
 authors = [{ name = "tinypinglite", email = "tinyping@proton.com" }]
 readme = "README.md"
+license = "PolyForm-Noncommercial-1.0.0"
 requires-python = ">=3.10,<3.11"
 dependencies = [
     "fastapi==0.110.1",
