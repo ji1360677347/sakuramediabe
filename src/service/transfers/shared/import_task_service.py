@@ -87,7 +87,9 @@ class ImportTaskService:
                     params["plugin_id"] = plugin_id
                 if download_task is not None:
                     # 下载任务导入只认准该任务的目标番号，资源包里的其它番号一律忽略。
-                    params["target_movie_number"] = download_task.movie
+                    params["target_movie_number"] = (
+                        download_task.movie if request.media_kind == "jav" else None
+                    )
                 task_run = ActivityService.create_task_run(
                     task_key=cls.TASK_KEY,
                     task_name=task_name or cls._task_name(request),
@@ -116,6 +118,23 @@ class ImportTaskService:
         )
 
     @classmethod
+    def build_download_import_request(cls, task: DownloadTask) -> ImportRequest:
+        """按任务持久化的真实类型/合集/源处置构造导入请求。
+
+        自动导入、批量重导与单任务重导共用本方法，避免三处各自推断媒体类型。
+        """
+        media_kind = task.media_kind or "jav"
+        return ImportRequest(
+            media_kind=media_kind,
+            library_id=task.client.library_id,
+            source_ref=task.completed_source_ref,
+            source_disposition=(
+                "delete_after_commit" if task.delete_source_after_import else "keep"
+            ),
+            collection_id=task.collection_id if media_kind == "video" else None,
+        )
+
+    @classmethod
     def enqueue_batch(
         cls,
         download_tasks: list[DownloadTask],
@@ -135,18 +154,15 @@ class ImportTaskService:
             raise ApiError(422, "invalid_media_library_provider", "媒体库缺少 provider_key")
         batch_items = []
         for task in download_tasks:
-            request = ImportRequest(
-                media_kind="jav",
-                library_id=library.id,
-                source_ref=task.completed_source_ref,
-                source_disposition="keep",
-            )
+            request = cls.build_download_import_request(task)
             batch_items.append(
                 {
                     "download_task_id": int(task.id),
                     **request.model_dump(),
                     # 下载任务导入只认准该任务的目标番号，资源包里的其它番号一律忽略。
-                    "target_movie_number": task.movie,
+                    "target_movie_number": (
+                        task.movie if request.media_kind == "jav" else None
+                    ),
                 }
             )
         params = {

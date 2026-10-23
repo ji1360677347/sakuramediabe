@@ -37,7 +37,14 @@ from src.common.movie_numbers import (
 )
 from src.common.service_helpers import emit_progress
 from src.metadata.provider import MetadataNotFoundError, MetadataRequestError
-from src.model import Media, MediaLibrary, Movie, VideoItem, get_database
+from src.model import (
+    Media,
+    MediaLibrary,
+    Movie,
+    VideoCollection,
+    VideoItem,
+    get_database,
+)
 from src.plugins.provider_protocol import (
     MEDIA_PROVIDER_REGISTRY,
     ImportFile,
@@ -196,6 +203,16 @@ class MediaImportService:
             raise ApiError(422, "invalid_media_kind", "无效的媒体类型")
         if media_kind == "jav" and collection_id is not None:
             raise ApiError(422, "invalid_collection", "jav import does not support collection_id")
+        if collection_id is not None and VideoCollection.get_or_none(
+            VideoCollection.id == collection_id
+        ) is None:
+            # 合集可能在入队后、执行前被删除；忽略归集继续导入，避免整包视频回滚失败。
+            logger.warning(
+                "Import collection missing; skip collection assignment library_id={} collection_id={}",
+                library_id,
+                collection_id,
+            )
+            collection_id = None
         storage = self._storage(library)
         if source_disposition == "in_place" and not self._supports_in_place_import(
             library, storage

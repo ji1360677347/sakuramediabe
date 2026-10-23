@@ -3,14 +3,22 @@
 from __future__ import annotations
 
 from src.api.exception.errors import ApiError
+from src.common.media_import_status import IMPORT_STATUS_PENDING
+from src.common.movie_numbers import movie_number_lookup_values, normalize_movie_number
 from src.model import (
     DownloadResourceBlacklist,
     DownloadSubmissionRecord,
     DownloadTask,
     Movie,
+    VideoCollection,
 )
 from src.model.base import get_database
-from src.plugins.provider_protocol import DownloadSubmission, ProviderOperationError
+from src.plugins.provider_protocol import (
+    MEDIA_PROVIDER_REGISTRY,
+    DownloadSubmission,
+    ProviderOperationError,
+    RemoteDownloadTask,
+)
 from src.schema.transfers.downloads import (
     DownloadRequestCreateRequest,
     DownloadRequestCreateResponse,
@@ -25,7 +33,11 @@ from src.service.transfers.downloads.common import (
     validate_non_empty,
     validate_remote_download_task,
 )
-from src.service.transfers.downloads.resource_hash import resolve_resource_hash
+from src.service.transfers.downloads.resource_hash import (
+    resolve_magnet,
+    resolve_resource_hash,
+    resolve_torrent_upload,
+)
 
 
 class DownloadRequestService:
@@ -47,39 +59,20 @@ class DownloadRequestService:
             "candidate title cannot be empty",
         )
         info_hash = resolve_resource_hash(source_uri)
-        display_name = f"{movie_number}-{info_hash[:6]}"
+        display_name = self._provider_display_name(movie_number, info_hash)
         if DownloadResourceBlacklist.select().where(
             DownloadResourceBlacklist.info_hash == info_hash
         ).exists():
             raise ApiError(422, "download_source_blacklisted", "该资源已被拉黑")
-        record = DownloadSubmissionRecord.create(
-            client_id=client.id,
+        record, remote_task = self._submit_source(
+            client,
             movie_number=movie_number,
             indexer_name=payload.candidate.indexer_name,
             title=candidate_title,
             source_uri=source_uri,
             info_hash=info_hash,
+            display_name=display_name,
         )
-        try:
-            remote_task = download_provider(client).submit(
-                submission=DownloadSubmission(
-                    source_uri=source_uri,
-                    display_name=display_name,
-                )
-            )
-            remote_task = validate_remote_download_task(remote_task)
-        except Exception as exc:
-            record.state = "failed"
-            record.error_code = (
-                exc.code if isinstance(exc, (ApiError, ProviderOperationError)) else type(exc).__name__
-            )
-            record.save()
-            if isinstance(exc, ProviderOperationError):
-                raise self._provider_error(exc) from exc
-            raise
-        record.state = "submitted"
-        record.remote_id = remote_task.remote_id
-        record.save()
         with get_database().atomic():
             task, created = DownloadTask.get_or_create(
                 client=client,
@@ -121,6 +114,227 @@ class DownloadRequestService:
             task=DownloadTaskResource.from_model(task),
             created=created,
         )
+
+    def create_manual_request(
+        self,
+        *,
+        client_id: int,
+        media_kind: str,
+        source_uri: str | None = None,
+        torrent_bytes: bytes | None = None,
+        movie_number: str | None = None,
+        collection_id: int | None = None,
+        display_name: str | None = None,
+        delete_source_after_import: bool = False,
+    ) -> DownloadRequestCreateResponse:
+        """用户手动提交磁力链或上传种子；不经过索引器，下载器必选。"""
+        if media_kind not in {"jav", "video"}:
+            raise ApiError(422, "invalid_media_kind", "无效的媒体类型")
+        # 先校验纯输入，再查库，错误顺序与用户填写顺序一致。
+        if media_kind == "jav":
+            movie_number = self._manual_movie_number(movie_number)
+        else:
+            movie_number = None
+        client = require_client(client_id)
+        if collection_id is not None:
+            if media_kind != "video":
+                raise ApiError(
+                    422, "invalid_collection", "jav import does not support collection_id"
+                )
+            if VideoCollection.get_or_none(VideoCollection.id == collection_id) is None:
+                raise ApiError(
+                    404,
+                    "video_collection_not_found",
+                    "视频合集不存在",
+                    {"collection_id": collection_id},
+                )
+
+        if torrent_bytes is not None:
+            info_hash, torrent_name = resolve_torrent_upload(torrent_bytes)
+            source_uri = f"magnet:?xt=urn:btih:{info_hash}"
+            supports_torrent_bytes = MEDIA_PROVIDER_REGISTRY.supports_torrent_bytes(
+                client.library.provider_key
+            )
+        else:
+            source_uri = (source_uri or "").strip()
+            info_hash, torrent_name = resolve_magnet(source_uri)
+            supports_torrent_bytes = False
+
+        if DownloadResourceBlacklist.select().where(
+            DownloadResourceBlacklist.info_hash == info_hash
+        ).exists():
+            raise ApiError(422, "download_source_blacklisted", "该资源已被拉黑")
+
+        existing_task_id = (
+            DownloadSubmissionRecord.select(DownloadSubmissionRecord.task_id)
+            .where(
+                (DownloadSubmissionRecord.client_id == client.id)
+                & (DownloadSubmissionRecord.info_hash == info_hash)
+                & (DownloadSubmissionRecord.task_id.is_null(False))
+            )
+            .order_by(DownloadSubmissionRecord.id.desc())
+            .scalar()
+        )
+        if existing_task_id is not None:
+            existing_task = DownloadTask.get_or_none(DownloadTask.id == existing_task_id)
+            if (
+                existing_task is not None
+                and existing_task.import_status != IMPORT_STATUS_PENDING
+            ):
+                raise ApiError(
+                    409,
+                    "download_task_already_imported",
+                    "该资源已有下载任务且已进入导入流程",
+                    {"task_id": existing_task.id},
+                )
+
+        requested_name = (display_name or "").strip()[:255]
+        base_name = requested_name or torrent_name or movie_number or info_hash[:8]
+        provider_display_name = self._provider_display_name(base_name, info_hash)
+        record, remote_task = self._submit_source(
+            client,
+            movie_number=movie_number or "",
+            indexer_name="manual",
+            title=base_name,
+            source_uri=source_uri,
+            info_hash=info_hash,
+            display_name=provider_display_name,
+            torrent_bytes=torrent_bytes if supports_torrent_bytes else None,
+        )
+
+        task_fields = {
+            "movie": movie_number,
+            "media_kind": media_kind,
+            "collection_id": collection_id,
+            "delete_source_after_import": bool(delete_source_after_import),
+            "name": remote_task.name or provider_display_name,
+            "state": remote_task.state,
+            "progress": remote_task.progress,
+            "completed_source_ref": remote_task.completed_source_ref,
+        }
+        with get_database().atomic():
+            task = DownloadTask.get_or_none(
+                (DownloadTask.client == client)
+                & (DownloadTask.remote_id == remote_task.remote_id)
+            )
+            if task is not None and task.import_status != IMPORT_STATUS_PENDING:
+                record.state = "failed"
+                record.error_code = "download_task_already_imported"
+                record.save()
+                raise ApiError(
+                    409,
+                    "download_task_already_imported",
+                    "该资源已有下载任务且已进入导入流程",
+                    {"task_id": task.id},
+                )
+            if task is None:
+                task = DownloadTask.create(
+                    client=client,
+                    remote_id=remote_task.remote_id,
+                    import_status=IMPORT_STATUS_PENDING,
+                    display_name=requested_name or None,
+                    **task_fields,
+                )
+                created = True
+            else:
+                # 重提同一资源且未填写名字时保留上一次的用户命名。
+                task_fields["display_name"] = requested_name or task.display_name
+                for field, value in task_fields.items():
+                    setattr(task, field, value)
+                task.save(only=[getattr(DownloadTask, field) for field in task_fields])
+                created = False
+            record.task_id = task.id
+            record.save(only=[DownloadSubmissionRecord.task_id])
+            if created and media_kind == "jav" and movie_number:
+                Movie.update(media_replacement_pending=False).where(
+                    Movie.movie_number == movie_number,
+                    Movie.media_replacement_pending == True,
+                ).execute()
+        return DownloadRequestCreateResponse(
+            task=DownloadTaskResource.from_model(task),
+            created=created,
+        )
+
+    def _submit_source(
+        self,
+        client,
+        *,
+        movie_number: str,
+        indexer_name: str,
+        title: str,
+        source_uri: str,
+        info_hash: str,
+        display_name: str,
+        torrent_bytes: bytes | None = None,
+    ) -> tuple[DownloadSubmissionRecord, RemoteDownloadTask]:
+        record = DownloadSubmissionRecord.create(
+            client_id=client.id,
+            movie_number=movie_number,
+            indexer_name=indexer_name,
+            title=title,
+            source_uri=source_uri,
+            info_hash=info_hash,
+        )
+        try:
+            remote_task = download_provider(client).submit(
+                submission=DownloadSubmission(
+                    source_uri=source_uri,
+                    display_name=display_name,
+                    torrent_bytes=torrent_bytes,
+                )
+            )
+            remote_task = validate_remote_download_task(remote_task)
+        except Exception as exc:
+            record.state = "failed"
+            record.error_code = (
+                exc.code
+                if isinstance(exc, (ApiError, ProviderOperationError))
+                else type(exc).__name__
+            )
+            record.save()
+            if isinstance(exc, ProviderOperationError):
+                raise self._provider_error(exc) from exc
+            raise
+        record.state = "submitted"
+        record.remote_id = remote_task.remote_id
+        record.save()
+        return record, remote_task
+
+    @staticmethod
+    def _manual_movie_number(value: str | None) -> str:
+        raw = (value or "").strip()
+        if not raw:
+            raise ApiError(
+                422,
+                "invalid_download_request_movie_number",
+                "JAV 手动下载必须填写番号",
+            )
+        candidates = movie_number_lookup_values(raw)
+        movie = (
+            Movie.get_or_none(Movie.movie_number.in_(candidates))
+            if candidates
+            else None
+        )
+        if movie is not None:
+            return movie.movie_number
+        normalized = normalize_movie_number(raw)
+        if not normalized:
+            raise ApiError(
+                422,
+                "invalid_download_request_movie_number",
+                "JAV 手动下载必须填写番号",
+            )
+        return normalized
+
+    @staticmethod
+    def _provider_display_name(base: str, info_hash: str) -> str:
+        # 115 以 <name>-<hash6> 识别托管目录；qB 也沿用同一目录命名。
+        # 先截名字再加后缀，保证总长不超过 display_name 列的 255。
+        suffix = info_hash[:6]
+        name = " ".join((base or "").split())[:248] or info_hash[:8]
+        if name.lower().endswith(f"-{suffix}"):
+            return name
+        return f"{name}-{suffix}"
 
     @staticmethod
     def _provider_error(exc: ProviderOperationError) -> ApiError:

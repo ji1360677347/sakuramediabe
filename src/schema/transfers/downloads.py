@@ -109,10 +109,26 @@ class DownloadRequestCreateRequest(SchemaModel):
     candidate: DownloadCandidateCreatePayload
 
 
+class DownloadManualRequest(SchemaModel):
+    """用户手动提交磁力链；种子文件走 /download-requests/manual/torrent。"""
+
+    client_id: int = Field(gt=0)
+    media_kind: Literal["jav", "video"]
+    source_uri: str = Field(min_length=1)
+    movie_number: str | None = None
+    collection_id: int | None = Field(default=None, gt=0)
+    display_name: str | None = None
+    delete_source_after_import: bool = False
+
+
 class DownloadTaskResource(SchemaModel):
     id: int
     client_id: int
     movie_number: str | None = None
+    media_kind: str = "jav"
+    collection_id: int | None = None
+    delete_source_after_import: bool = False
+    display_name: str | None = None
     name: str
     remote_id: str
     state: str
@@ -135,6 +151,10 @@ class DownloadTaskResource(SchemaModel):
             "id": task.id,
             "client_id": task.client_id,
             "movie_number": task.movie,
+            "media_kind": task.media_kind or "jav",
+            "collection_id": task.collection_id,
+            "delete_source_after_import": bool(task.delete_source_after_import),
+            "display_name": task.display_name,
             "name": task.name,
             "remote_id": task.remote_id,
             "state": task.state,

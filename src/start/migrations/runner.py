@@ -57,6 +57,9 @@ MOVIE_INTERACTION_SORT_INDEXES_MIGRATION_NAME = (
 MOVIE_RATINGS_MIGRATION_NAME = "20261020_01_add_movie_ratings"
 ACTOR_GENDER_CHECKED_AT_MIGRATION_NAME = "20261023_01_add_actor_gender_checked_at"
 TASK_RUN_SCOPE_KEY_MIGRATION_NAME = "20261023_02_add_task_run_scope_key"
+DOWNLOAD_TASK_MANUAL_FIELDS_MIGRATION_NAME = (
+    "20261024_01_add_download_task_manual_fields"
+)
 
 
 @dataclass(frozen=True)

@@ -226,6 +226,8 @@ class ClipArtifact:
 class DownloadSubmission:
     source_uri: str
     display_name: str
+    # 页面上传的完整种子；支持该能力的 provider 优先使用它，避免纯磁力丢失 tracker。
+    torrent_bytes: bytes | None = None
 
 
 @dataclass(frozen=True)
@@ -603,6 +605,13 @@ class MediaProviderRegistry:
         entry = self._bundles.get(provider_key)
         bundle = entry[1] if entry is not None else None
         return bool(getattr(bundle, "supports_in_place_import", False))
+
+    def supports_torrent_bytes(self, provider_key: str) -> bool:
+        """Whether the active download component accepts uploaded torrent bytes."""
+        entry = self._bundles.get(provider_key)
+        bundle = entry[1] if entry is not None else None
+        downloads = getattr(bundle, "downloads", None)
+        return bool(getattr(downloads, "supports_torrent_bytes", False))
 
     def require(self, provider_key: str) -> MediaProviderBundle:
         entry = self._bundles.get(provider_key)

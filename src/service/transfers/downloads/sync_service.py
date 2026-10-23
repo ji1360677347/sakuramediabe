@@ -70,7 +70,7 @@ class DownloadSyncService:
                 (DownloadTask.client == client)
                 & (DownloadTask.remote_id == remote_task.remote_id)
             )
-            if task is None or task.movie is None:
+            if task is None:
                 # 只跟踪宿主提交并已登记的任务，不把下载器里的外部任务带入自动导入链路。
                 unchanged_count += 1
                 continue
@@ -223,7 +223,8 @@ class DownloadSyncService:
             (DownloadTask.state == "completed")
             & (DownloadTask.completed_source_ref.is_null(False))
             & (DownloadTask.import_status == IMPORT_STATUS_PENDING)
-            & (DownloadTask.movie.is_null(False))
+            # 普通视频没有番号，按 media_kind 进入导入；JAV 无番号只可能是历史外部任务，继续跳过。
+            & ((DownloadTask.media_kind != "jav") | (DownloadTask.movie.is_null(False)))
         ).order_by(DownloadTask.id.asc()):
             tasks_by_library.setdefault(task.client.library_id, []).append(task)
         logger.info(

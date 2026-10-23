@@ -1,4 +1,6 @@
-from fastapi import APIRouter, Depends, Query, Response, status
+from typing import Literal
+
+from fastapi import APIRouter, Depends, File, Form, Query, Response, UploadFile, status
 from fastapi.encoders import jsonable_encoder
 from fastapi.responses import JSONResponse
 
@@ -13,6 +15,7 @@ from src.schema.transfers.downloads import (
     DownloadClientResource,
     DownloadClientTestRequest,
     DownloadClientUpdateRequest,
+    DownloadManualRequest,
     DownloadRequestCreateRequest,
     DownloadRequestCreateResponse,
     DownloadTaskBatchImportRequest,
@@ -24,6 +27,7 @@ from src.schema.transfers.downloads import (
 )
 from src.service.transfers.downloads.client_config_service import DownloadClientService
 from src.service.transfers.downloads.request_service import DownloadRequestService
+from src.service.transfers.downloads.resource_hash import MAX_TORRENT_BYTES
 from src.service.transfers.downloads.search_service import DownloadSearchService
 from src.service.transfers.downloads.task_service import DownloadTaskService
 
@@ -90,6 +94,55 @@ def create_download_request(
     current_user=Depends(get_current_user),
 ):
     result = DownloadRequestService().create_request(payload)
+    status_code = status.HTTP_201_CREATED if result.created else status.HTTP_200_OK
+    return JSONResponse(status_code=status_code, content=jsonable_encoder(result))
+
+
+@router.post(
+    "/download-requests/manual",
+    response_model=DownloadRequestCreateResponse,
+)
+def create_manual_download_request(
+    payload: DownloadManualRequest,
+    current_user=Depends(get_current_user),
+):
+    result = DownloadRequestService().create_manual_request(
+        client_id=payload.client_id,
+        media_kind=payload.media_kind,
+        source_uri=payload.source_uri,
+        movie_number=payload.movie_number,
+        collection_id=payload.collection_id,
+        display_name=payload.display_name,
+        delete_source_after_import=payload.delete_source_after_import,
+    )
+    status_code = status.HTTP_201_CREATED if result.created else status.HTTP_200_OK
+    return JSONResponse(status_code=status_code, content=jsonable_encoder(result))
+
+
+@router.post(
+    "/download-requests/manual/torrent",
+    response_model=DownloadRequestCreateResponse,
+)
+async def create_manual_torrent_download_request(
+    client_id: int = Form(..., gt=0),
+    media_kind: Literal["jav", "video"] = Form(...),
+    movie_number: str | None = Form(default=None),
+    collection_id: int | None = Form(default=None),
+    display_name: str | None = Form(default=None),
+    delete_source_after_import: bool = Form(default=False),
+    file: UploadFile = File(...),
+    current_user=Depends(get_current_user),
+):
+    payload_bytes = await file.read(MAX_TORRENT_BYTES + 1)
+    result = DownloadRequestService().create_manual_request(
+        client_id=client_id,
+        media_kind=media_kind,
+        torrent_bytes=payload_bytes,
+        movie_number=movie_number,
+        collection_id=collection_id,
+        display_name=display_name,
+        delete_source_after_import=delete_source_after_import,
+    )
     status_code = status.HTTP_201_CREATED if result.created else status.HTTP_200_OK
     return JSONResponse(status_code=status_code, content=jsonable_encoder(result))
 

@@ -64,6 +64,21 @@ class DownloadTask(TimestampedMixin, BaseModel):
     )
     # 影片番号不是 provider 身份，只是宿主业务投影，允许任务早于影片入库。
     movie = peewee.CharField(max_length=255, null=True, column_name="movie_number", index=True)
+    # 导入类型由提交时决定；历史任务与索引器路径默认按 JAV。
+    media_kind = peewee.CharField(
+        max_length=32,
+        default="jav",
+        constraints=[peewee.SQL("DEFAULT 'jav'")],
+    )
+    # 仅 video 使用；合集删除后任务保留，导入时兜底忽略归集。
+    collection_id = peewee.IntegerField(null=True)
+    # 导入成功后删除下载器中的源文件。
+    delete_source_after_import = peewee.BooleanField(
+        default=False,
+        constraints=[peewee.SQL("DEFAULT FALSE")],
+    )
+    # 用户提交的任务名；provider 同步回来的 name 可能被远端覆盖，展示优先使用本列。
+    display_name = peewee.CharField(max_length=255, null=True)
     remote_id = peewee.CharField(max_length=255)
     # 115 等 provider 同步回来的离线任务名来自原始种子标题，长度不可控。
     name = peewee.TextField()

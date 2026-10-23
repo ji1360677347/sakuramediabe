@@ -300,7 +300,7 @@ def test_empty_download_snapshot_does_not_remove_ghost_tasks(test_db):
     assert DownloadSyncService._prune_ghost_tasks(client.id, set()) == 0
 
 
-def test_download_sync_only_updates_movie_linked_tasks(test_db):
+def test_download_sync_updates_all_registered_tasks(test_db):
     library = MediaLibrary.create(name="library", provider_key="demo", provider_config={})
     client = DownloadClient.create(name="client", library=library, provider_config={})
     long_remote_name = "long-" + "n" * 400
@@ -354,12 +354,13 @@ def test_download_sync_only_updates_movie_linked_tasks(test_db):
     assert known_task.state == "downloading"
     assert known_task.progress == 0.5
     external_task = DownloadTask.get_by_id(external_task.id)
-    assert external_task.name == "old-external-name"
-    assert external_task.state == "queued"
+    assert external_task.name == "new-external-name"
+    assert external_task.state == "downloading"
+    assert external_task.progress == 0.5
     assert DownloadTask.get_or_none(DownloadTask.remote_id == "unregistered") is None
     assert result.created_count == 0
-    assert result.updated_count == 1
-    assert result.unchanged_count == 2
+    assert result.updated_count == 2
+    assert result.unchanged_count == 1
 
 
 def test_download_sync_rejects_orphan_without_submitted_record(test_db):
@@ -644,7 +645,7 @@ def test_imported_task_survives_remote_disappearance(test_db):
     assert DownloadTask.get_by_id(active.id).progress == 0.6
 
 
-def test_auto_import_skips_unbound_completed_tasks(test_db, monkeypatch):
+def test_auto_import_includes_video_and_skips_unbound_jav(test_db, monkeypatch):
     library = MediaLibrary.create(name="library", provider_key="demo", provider_config={})
     client = DownloadClient.create(name="client", library=library, provider_config={})
     tracked_task = DownloadTask.create(
@@ -657,13 +658,23 @@ def test_auto_import_skips_unbound_completed_tasks(test_db, monkeypatch):
         completed_source_ref={"id": "tracked-source"},
         import_status="pending",
     )
-    DownloadTask.create(
+    video_task = DownloadTask.create(
         client=client,
-        remote_id="external",
-        name="external",
+        remote_id="video",
+        name="video",
         state="completed",
         progress=1,
-        completed_source_ref={"id": "external-source"},
+        completed_source_ref={"id": "video-source"},
+        import_status="pending",
+        media_kind="video",
+    )
+    DownloadTask.create(
+        client=client,
+        remote_id="unbound-jav",
+        name="unbound-jav",
+        state="completed",
+        progress=1,
+        completed_source_ref={"id": "unbound-source"},
         import_status="pending",
     )
     triggered_batches: list[list[int]] = []
@@ -674,8 +685,8 @@ def test_auto_import_skips_unbound_completed_tasks(test_db, monkeypatch):
 
     result = DownloadSyncService().enqueue_auto_imports()
 
-    assert triggered_batches == [[tracked_task.id]]
-    assert result["queued_count"] == 1
+    assert triggered_batches == [[tracked_task.id, video_task.id]]
+    assert result["queued_count"] == 2
 
 
 def test_auto_import_batches_tasks_for_each_library(test_db, monkeypatch):

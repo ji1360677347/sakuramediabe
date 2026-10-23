@@ -29,7 +29,6 @@ from src.schema.transfers.downloads import (
     DownloadTaskImportResponse,
     DownloadTaskResource,
 )
-from src.schema.transfers.media_import import ImportRequest
 from src.service.transfers.downloads.common import (
     build_task_movie_filter,
     download_provider,
@@ -150,16 +149,12 @@ class DownloadTaskService:
                 "该任务的导入已完成或正在进行",
                 {"task_id": task_id, "import_status": task.import_status},
             )
+        request = ImportTaskService.build_download_import_request(task)
         accepted = ImportTaskService.enqueue(
-            ImportRequest(
-                media_kind="jav",
-                library_id=task.client.library_id,
-                source_ref=task.completed_source_ref,
-                source_disposition="keep",
-            ),
+            request,
             trigger_type=trigger_type,
             download_task_id=task.id,
-            task_name=f"下载任务导入 {task.movie or task.name}",
+            task_name=f"下载任务导入 {task.movie or task.display_name or task.name}",
             allowed_download_statuses=importable_statuses,
         )
         return DownloadTaskImportResponse(

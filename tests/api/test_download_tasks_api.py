@@ -1,5 +1,7 @@
 """下载任务列表筛选与手动触发导入接口的回归测试。"""
 
+from datetime import datetime, timezone
+
 from src.model import (
     BackgroundTaskRun,
     DownloadClient,
@@ -9,8 +11,13 @@ from src.model import (
     Movie,
 )
 from src.plugins.provider_protocol import ImportFile, ProviderUnavailableError
+from src.schema.transfers.downloads import (
+    DownloadRequestCreateResponse,
+    DownloadTaskResource,
+)
 from src.service.system.task_queue_service import TaskQueueService
 from src.service.transfers.downloads import task_service
+from src.service.transfers.downloads.request_service import DownloadRequestService
 from src.service.transfers.shared.import_task_service import ImportTaskService
 
 
@@ -446,3 +453,73 @@ def test_batch_import_rejects_empty_task_ids(client, account_user):
     )
 
     assert response.status_code == 422, response.text
+
+
+def test_manual_download_requires_movie_number_for_jav(client, account_user):
+    token = _login(client, account_user.username)
+
+    response = client.post(
+        "/download-requests/manual",
+        json={
+            "client_id": 1,
+            "media_kind": "jav",
+            "source_uri": "magnet:?xt=urn:btih:" + "a" * 40,
+        },
+        headers=_auth(token),
+    )
+
+    assert response.status_code == 422, response.text
+
+
+def test_manual_torrent_route_passes_uploaded_bytes(
+    client, account_user, monkeypatch
+):
+    token = _login(client, account_user.username)
+    captured = {}
+
+    def fake_create_manual_request(self, **kwargs):
+        captured.update(kwargs)
+        now = datetime.now(timezone.utc)
+        return DownloadRequestCreateResponse(
+            task=DownloadTaskResource(
+                id=1,
+                client_id=kwargs["client_id"],
+                name="uploaded",
+                remote_id="hash",
+                state="queued",
+                progress=0.0,
+                import_status="pending",
+                created_at=now,
+                updated_at=now,
+            ),
+            created=True,
+        )
+
+    monkeypatch.setattr(
+        DownloadRequestService, "create_manual_request", fake_create_manual_request
+    )
+
+    response = client.post(
+        "/download-requests/manual/torrent",
+        data={
+            "client_id": "1",
+            "media_kind": "video",
+            "display_name": "uploaded",
+            "delete_source_after_import": "true",
+        },
+        files={
+            "file": (
+                "sample.torrent",
+                b"torrent-bytes",
+                "application/x-bittorrent",
+            )
+        },
+        headers=_auth(token),
+    )
+
+    assert response.status_code == 201, response.text
+    assert captured["torrent_bytes"] == b"torrent-bytes"
+    assert captured["client_id"] == 1
+    assert captured["media_kind"] == "video"
+    assert captured["display_name"] == "uploaded"
+    assert captured["delete_source_after_import"] is True
