@@ -5,6 +5,7 @@ import pytest
 from pydantic import ValidationError
 
 from src.api.exception.errors import ApiError
+from src.common.runtime_time import utc_now_for_db
 from src.model import (
     DownloadClient,
     DownloadSubmissionRecord,
@@ -28,6 +29,7 @@ from src.service.transfers.downloads.common import validate_remote_download_task
 from src.service.transfers.downloads.request_service import DownloadRequestService
 from src.service.transfers.downloads.sync_service import (
     REMOTE_MISS_CONFIRM_SECONDS,
+    TASK_TIMEOUT_SECONDS,
     DownloadSyncService,
 )
 from src.service.transfers.downloads.task_service import DownloadTaskService
@@ -361,6 +363,194 @@ def test_download_sync_updates_all_registered_tasks(test_db):
     assert result.created_count == 0
     assert result.updated_count == 2
     assert result.unchanged_count == 1
+
+
+def test_download_sync_fails_task_after_timeout(test_db):
+    library = MediaLibrary.create(name="library", provider_key="demo", provider_config={})
+    client = DownloadClient.create(name="client", library=library, provider_config={})
+    task = DownloadTask.create(
+        client=client,
+        movie="ABC-020",
+        remote_id="stuck-downloading",
+        name="stuck-downloading",
+        state="downloading",
+        progress=0.4,
+        import_status="pending",
+        created_at=utc_now_for_db() - timedelta(seconds=TASK_TIMEOUT_SECONDS + 60),
+    )
+    remote_tasks = (
+        RemoteDownloadTask(
+            remote_id="stuck-downloading",
+            name="stuck-downloading",
+            state="downloading",
+            progress=0.4,
+            completed_source_ref=None,
+        ),
+    )
+
+    result = DownloadSyncService(
+        provider_factory=lambda _client: SimpleNamespace(list_tasks=lambda: remote_tasks)
+    ).sync_client(client.id)
+
+    assert DownloadTask.get_by_id(task.id).state == "failed"
+    assert result.updated_count == 1
+
+
+def test_download_sync_fails_queued_task_after_timeout(test_db):
+    library = MediaLibrary.create(name="library", provider_key="demo", provider_config={})
+    client = DownloadClient.create(name="client", library=library, provider_config={})
+    task = DownloadTask.create(
+        client=client,
+        movie="ABC-021",
+        remote_id="stuck-queued",
+        name="stuck-queued",
+        state="queued",
+        progress=0,
+        import_status="pending",
+        created_at=utc_now_for_db() - timedelta(seconds=TASK_TIMEOUT_SECONDS + 60),
+    )
+    remote_tasks = (
+        RemoteDownloadTask(
+            remote_id="stuck-queued",
+            name="stuck-queued",
+            state="queued",
+            progress=0,
+            completed_source_ref=None,
+        ),
+    )
+
+    result = DownloadSyncService(
+        provider_factory=lambda _client: SimpleNamespace(list_tasks=lambda: remote_tasks)
+    ).sync_client(client.id)
+
+    assert DownloadTask.get_by_id(task.id).state == "failed"
+    assert result.updated_count == 1
+
+
+def test_download_sync_keeps_task_before_timeout(test_db):
+    library = MediaLibrary.create(name="library", provider_key="demo", provider_config={})
+    client = DownloadClient.create(name="client", library=library, provider_config={})
+    task = DownloadTask.create(
+        client=client,
+        movie="ABC-022",
+        remote_id="slow-but-fresh",
+        name="slow-but-fresh",
+        state="downloading",
+        progress=0.2,
+        import_status="pending",
+        created_at=utc_now_for_db() - timedelta(seconds=TASK_TIMEOUT_SECONDS - 60),
+    )
+    remote_tasks = (
+        RemoteDownloadTask(
+            remote_id="slow-but-fresh",
+            name="slow-but-fresh",
+            state="downloading",
+            progress=0.2,
+            completed_source_ref=None,
+        ),
+    )
+
+    DownloadSyncService(
+        provider_factory=lambda _client: SimpleNamespace(list_tasks=lambda: remote_tasks)
+    ).sync_client(client.id)
+
+    assert DownloadTask.get_by_id(task.id).state == "downloading"
+
+
+def test_download_sync_accepts_completion_after_timeout(test_db):
+    library = MediaLibrary.create(name="library", provider_key="demo", provider_config={})
+    client = DownloadClient.create(name="client", library=library, provider_config={})
+    task = DownloadTask.create(
+        client=client,
+        movie="ABC-023",
+        remote_id="late-completed",
+        name="late-completed",
+        state="downloading",
+        progress=0.9,
+        import_status="pending",
+        created_at=utc_now_for_db() - timedelta(seconds=TASK_TIMEOUT_SECONDS + 60),
+    )
+    remote_tasks = (
+        RemoteDownloadTask(
+            remote_id="late-completed",
+            name="late-completed",
+            state="completed",
+            progress=1.0,
+            completed_source_ref={"id": "source"},
+        ),
+    )
+
+    DownloadSyncService(
+        provider_factory=lambda _client: SimpleNamespace(list_tasks=lambda: remote_tasks)
+    ).sync_client(client.id)
+
+    refreshed = DownloadTask.get_by_id(task.id)
+    assert refreshed.state == "completed"
+    assert refreshed.completed_source_ref == {"id": "source"}
+
+
+def test_download_sync_skips_timeout_while_import_running(test_db):
+    library = MediaLibrary.create(name="library", provider_key="demo", provider_config={})
+    client = DownloadClient.create(name="client", library=library, provider_config={})
+    task = DownloadTask.create(
+        client=client,
+        movie="ABC-024",
+        remote_id="import-in-flight",
+        name="import-in-flight",
+        state="downloading",
+        progress=0.5,
+        import_status="running",
+        created_at=utc_now_for_db() - timedelta(seconds=TASK_TIMEOUT_SECONDS + 60),
+    )
+    remote_tasks = (
+        RemoteDownloadTask(
+            remote_id="import-in-flight",
+            name="import-in-flight",
+            state="downloading",
+            progress=0.5,
+            completed_source_ref=None,
+        ),
+    )
+
+    DownloadSyncService(
+        provider_factory=lambda _client: SimpleNamespace(list_tasks=lambda: remote_tasks)
+    ).sync_client(client.id)
+
+    assert DownloadTask.get_by_id(task.id).state == "downloading"
+
+
+def test_download_sync_timeout_stays_failed_across_syncs(test_db):
+    library = MediaLibrary.create(name="library", provider_key="demo", provider_config={})
+    client = DownloadClient.create(name="client", library=library, provider_config={})
+    task = DownloadTask.create(
+        client=client,
+        movie="ABC-025",
+        remote_id="stuck-repeat",
+        name="stuck-repeat",
+        state="downloading",
+        progress=0.1,
+        import_status="pending",
+        created_at=utc_now_for_db() - timedelta(seconds=TASK_TIMEOUT_SECONDS + 60),
+    )
+    remote_tasks = (
+        RemoteDownloadTask(
+            remote_id="stuck-repeat",
+            name="stuck-repeat",
+            state="downloading",
+            progress=0.1,
+            completed_source_ref=None,
+        ),
+    )
+    service = DownloadSyncService(
+        provider_factory=lambda _client: SimpleNamespace(list_tasks=lambda: remote_tasks)
+    )
+
+    first = service.sync_client(client.id)
+    second = service.sync_client(client.id)
+
+    assert first.updated_count == 1
+    assert second.updated_count == 0
+    assert DownloadTask.get_by_id(task.id).state == "failed"
 
 
 def test_download_sync_rejects_orphan_without_submitted_record(test_db):

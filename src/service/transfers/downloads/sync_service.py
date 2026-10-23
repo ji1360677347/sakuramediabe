@@ -24,6 +24,9 @@ from src.service.transfers.shared.import_task_service import ImportTaskService
 # 连续缺席超过确认窗（同步每分钟一轮，5 分钟即连续 5 轮）才允许删除。
 REMOTE_MISS_CONFIRM_SECONDS = 5 * 60
 UNSEEN_TASK_GRACE_SECONDS = 15 * 60
+# 任务超过该时长仍未完成（远端仍报 queued / downloading）即判为失败。每次同步都
+# 按 created_at 重新判定，远端状态无法把它覆盖回去；72 小时给慢速种子留足时间。
+TASK_TIMEOUT_SECONDS = 72 * 60 * 60
 
 
 class DownloadSyncService:
@@ -61,6 +64,7 @@ class DownloadSyncService:
             ) from exc
 
         synced_at = utc_now_for_db()
+        timeout_cutoff = synced_at - timedelta(seconds=TASK_TIMEOUT_SECONDS)
         updated_count = unchanged_count = 0
         remote_ids: set[str] = set()
         for remote_task in remote_tasks:
@@ -74,10 +78,26 @@ class DownloadSyncService:
                 # 只跟踪宿主提交并已登记的任务，不把下载器里的外部任务带入自动导入链路。
                 unchanged_count += 1
                 continue
+            state = remote_task.state
+            if (
+                state in self._SYNCABLE_STATES
+                and task.import_status != IMPORT_STATUS_RUNNING
+                and task.created_at is not None
+                and task.created_at < timeout_cutoff
+            ):
+                if task.state != "failed":
+                    logger.info(
+                        "Download task timed out client_id={} task_id={} remote_id={} created_at={}",
+                        client.id,
+                        task.id,
+                        task.remote_id,
+                        task.created_at,
+                    )
+                state = "failed"
             changed: list = []
             for field, value in (
                 (DownloadTask.name, remote_task.name),
-                (DownloadTask.state, remote_task.state),
+                (DownloadTask.state, state),
                 (DownloadTask.progress, remote_task.progress),
                 (DownloadTask.completed_source_ref, remote_task.completed_source_ref),
             ):
