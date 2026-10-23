@@ -315,6 +315,32 @@ def _bootstrap_gfriends_filetree_refresh(scheduler: BlockingScheduler) -> None:
         logger.exception("Skip bootstrap gfriends filetree refresh due to unexpected error")
 
 
+INITIAL_RANKING_SYNC_TASK_KEY = "sakuramedia_javdb_ranking_sync"
+
+
+def _bootstrap_initial_ranking_sync(scheduler: BlockingScheduler) -> None:
+    """新部署（影片库为空）时立刻抓一次 JavDB 排行榜，尽快入库首批影片。
+
+    - 只触发 JavDB 排行榜插件的全量同步任务，其它榜单插件仍按各自的 cron 跑；
+    - 插件未安装/未启用的镜像里注册表没有该 key，_schedule_bootstrap_job 会记
+      warning 后跳过，不会影响启动；
+    - 抓取成功后影片表非空，后续重启自然不再触发，不需要额外的标记文件。
+    """
+    try:
+        from src.model import Movie
+
+        if Movie.select().count() > 0:
+            return
+        logger.info("检测到空影片库（新部署），安排一次 JavDB 排行榜同步")
+        _schedule_bootstrap_job(
+            scheduler,
+            INITIAL_RANKING_SYNC_TASK_KEY,
+            job_id="bootstrap_initial_ranking_sync",
+        )
+    except Exception:
+        logger.exception("Skip bootstrap initial ranking sync due to unexpected error")
+
+
 def _bootstrap_movie_similarity_index(scheduler: BlockingScheduler) -> None:
     """相似度 alias 缺失时立刻安排首次构建，不阻塞 APS 启动。"""
     if not movie_similarity_enabled():
@@ -383,6 +409,7 @@ def aps():
     logger.info("Scheduler runtime database ready {}", type(database).__name__)
     scheduler = build_scheduler()
     _bootstrap_gfriends_filetree_refresh(scheduler)
+    _bootstrap_initial_ranking_sync(scheduler)
     _bootstrap_movie_similarity_index(scheduler)
     # 队列 worker 与调度器同进程：APS 只按 cron 入队，worker 领取执行。
     worker = TaskWorker()

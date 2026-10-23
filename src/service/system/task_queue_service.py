@@ -33,7 +33,12 @@ BOOTSTRAP_LEASE_EXPIRED_ERROR_MESSAGE = "启动引导任务租约过期，已回
 INTERNAL_FAILURE_CODE_KEY = "_failure_code"
 FAILURE_CODE_QUEUE_LEASE_EXPIRED = "queue_lease_expired"
 BOOTSTRAP_QUEUE_TASK_KEYS = frozenset(
-    {"gfriends_filetree_refresh", "movie_similarity_recompute"}
+    {
+        "gfriends_filetree_refresh",
+        "movie_similarity_recompute",
+        # 新部署首启时由 APS 主动触发一次，尽快完成首批影片入库。
+        "sakuramedia_javdb_ranking_sync",
+    }
 )
 
 
