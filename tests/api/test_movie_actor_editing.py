@@ -270,16 +270,33 @@ def test_local_actor_delete_requires_no_references(client, account_user):
     assert client.get(f"/actors/{local_actor.id}", headers=headers).status_code == 404
 
 
-def test_local_actor_subscription_and_merge_direction_guards(client, account_user):
+def test_local_actor_can_be_subscribed_as_favorite(client, account_user):
     local_actor = Actor.create(javdb_id=None, name="本地女优")
-    remote_actor = Actor.create(javdb_id="remote-guard", name="远端女优")
     headers = _auth_headers(client, account_user)
 
     subscribed = client.put(
         f"/actors/{local_actor.id}/subscription", headers=headers
     )
-    assert subscribed.status_code == 422
-    assert subscribed.json()["error"]["code"] == "actor_not_subscribable"
+    assert subscribed.status_code == 204
+    fresh = Actor.get_by_id(local_actor.id)
+    assert fresh.is_subscribed is True
+    assert fresh.subscribed_at is not None
+
+    unsubscribed = client.delete(
+        f"/actors/{local_actor.id}/subscription", headers=headers
+    )
+    assert unsubscribed.status_code == 204
+    fresh = Actor.get_by_id(local_actor.id)
+    assert fresh.is_subscribed is False
+    assert fresh.subscribed_at is None
+
+
+def test_local_actor_merge_direction_guards_and_subscription_carry_over(
+    client, account_user
+):
+    local_actor = Actor.create(javdb_id=None, name="本地女优", is_subscribed=True)
+    remote_actor = Actor.create(javdb_id="remote-guard", name="远端女优")
+    headers = _auth_headers(client, account_user)
 
     merged = client.post(
         f"/actors/{local_actor.id}/merge",
@@ -296,3 +313,7 @@ def test_local_actor_subscription_and_merge_direction_guards(client, account_use
     )
     assert reverse.status_code == 200
     assert reverse.json()["id"] == remote_actor.id
+    # 本地女优作为来源合并进远端女优时，收藏态随合并保留。
+    target = Actor.get_by_id(remote_actor.id)
+    assert target.is_subscribed is True
+    assert target.subscribed_at is not None

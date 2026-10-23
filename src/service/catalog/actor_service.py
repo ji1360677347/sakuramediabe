@@ -944,13 +944,8 @@ class ActorService:
     def set_subscription(cls, actor_id: int, subscribed: bool) -> None:
         actor = cls._require_actor(actor_id)
 
-        if subscribed and actor.javdb_id is None:
-            raise ApiError(
-                422,
-                "actor_not_subscribable",
-                "本地女优没有 JavDB 身份，无法订阅",
-            )
-
+        # 本地女优同样允许订阅：没有 JavDB 身份时订阅仅作为收藏标记，
+        # 女优上新同步任务会按 javdb_id IS NOT NULL 自动跳过。
         if subscribed:
             actor.is_subscribed = True
             if actor.subscribed_at is None:

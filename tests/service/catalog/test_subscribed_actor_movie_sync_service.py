@@ -124,3 +124,22 @@ def test_sync_incremental_continues_to_merged_source_after_existing_hit(test_db)
     assert MovieActor.select().where(
         MovieActor.movie == imported, MovieActor.actor == target
     ).exists()
+
+
+def test_sync_skips_subscribed_local_actors(test_db):
+    local_actor = Actor.create(
+        javdb_id=None,
+        name="本地收藏女优",
+        is_subscribed=True,
+        subscribed_at=datetime(2024, 3, 1, 8, 0, 0),
+    )
+    provider = _FakeProvider(pages={}, details={})
+
+    stats = SubscribedActorMovieSyncService(
+        provider=provider
+    ).sync_subscribed_actor_movies()
+
+    assert stats["total_actors"] == 0
+    assert stats["imported_movies"] == 0
+    assert provider.actor_calls == []
+    assert Actor.get_by_id(local_actor.id).subscribed_movies_synced_at is None

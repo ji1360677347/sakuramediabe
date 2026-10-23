@@ -302,3 +302,23 @@ def test_actor_list_filters_playable_movies_and_sorts_by_count(
         playable_actor.id,
         unsubscribed_actor.id,
     ]
+
+
+def test_list_actors_includes_subscribed_local_actor(client, account_user):
+    local_actor = Actor.create(
+        javdb_id=None, name="本地收藏女优", gender=1, is_subscribed=True
+    )
+    headers = _headers(client, account_user)
+
+    response = client.get(
+        "/actors",
+        headers=headers,
+        params={"subscription_status": "subscribed"},
+    )
+
+    assert response.status_code == 200
+    item = next(
+        item for item in response.json()["items"] if item["id"] == local_actor.id
+    )
+    assert item["javdb_id"] is None
+    assert item["is_subscribed"] is True
