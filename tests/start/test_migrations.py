@@ -27,6 +27,7 @@ from src.start.migrations.runner import (
     ACTOR_LOCAL_PROFILE_MIGRATION_NAME,
     ACTOR_MERGED_INTO_MIGRATION_NAME,
     ACTOR_METADATA_MIGRATION_NAME,
+    ALLOW_LOCAL_ACTOR_MIGRATION_NAME,
     API_KEYS_MIGRATION_NAME,
     CONSOLIDATED_MIGRATION_NAME,
     DETACH_USER_ASSET_IMAGES_MIGRATION_NAME,
@@ -156,6 +157,7 @@ def test_current_migrations_are_discoverable_in_order():
         ACTOR_GENDER_CHECKED_AT_MIGRATION_NAME,
         TASK_RUN_SCOPE_KEY_MIGRATION_NAME,
         DOWNLOAD_TASK_MANUAL_FIELDS_MIGRATION_NAME,
+        ALLOW_LOCAL_ACTOR_MIGRATION_NAME,
     ]
 
 
@@ -188,6 +190,23 @@ def test_plugin_collection_ownership_migration_adds_columns_without_losing_rows(
     for table in ("playlist", "moment_collection", "clip_collection"):
         assert {"owner_plugin_id", "plugin_key"} <= _column_names(clean_db, table)
     assert Playlist.get_by_id(existing.id).name == "existing-plugin-migration"
+
+
+def test_allow_local_actor_migration_drops_javdb_id_not_null(clean_db):
+    clean_db.create_tables(TEST_MODELS)
+    clean_db.execute_sql("ALTER TABLE actor ALTER COLUMN javdb_id SET NOT NULL")
+    existing = Actor.create(javdb_id="remote-actor", name="远端演员")
+
+    migration = _load_migration_module(
+        Path(f"{ALLOW_LOCAL_ACTOR_MIGRATION_NAME}.py")
+    )
+    migration.migrate(clean_db)
+
+    assert Actor.get_by_id(existing.id).javdb_id == "remote-actor"
+    first = Actor.create(javdb_id=None, name="本地女优一")
+    second = Actor.create(javdb_id=None, name="本地女优二")
+    assert first.javdb_id is None and second.javdb_id is None
+    assert Actor.select().where(Actor.javdb_id.is_null()).count() == 2
 
 
 def test_run_pending_migrations_rejects_v0421_base(clean_db):
@@ -266,6 +285,7 @@ def test_run_pending_migrations_completes_fresh_current_schema_after_model_creat
         MigrationExecution(name=ACTOR_GENDER_CHECKED_AT_MIGRATION_NAME, applied=True),
         MigrationExecution(name=TASK_RUN_SCOPE_KEY_MIGRATION_NAME, applied=True),
         MigrationExecution(name=DOWNLOAD_TASK_MANUAL_FIELDS_MIGRATION_NAME, applied=True),
+        MigrationExecution(name=ALLOW_LOCAL_ACTOR_MIGRATION_NAME, applied=True),
     ]
     assert _schema_migration_names(clean_db) == [
         CONSOLIDATED_MIGRATION_NAME,
@@ -303,6 +323,7 @@ def test_run_pending_migrations_completes_fresh_current_schema_after_model_creat
         ACTOR_GENDER_CHECKED_AT_MIGRATION_NAME,
         TASK_RUN_SCOPE_KEY_MIGRATION_NAME,
         DOWNLOAD_TASK_MANUAL_FIELDS_MIGRATION_NAME,
+        ALLOW_LOCAL_ACTOR_MIGRATION_NAME,
     ]
 
 
@@ -674,7 +695,7 @@ def test_consolidated_migration_upgrades_v0421_schema_and_preserves_required_mem
         SchemaMigration.create(name=CONSOLIDATED_MIGRATION_NAME)
     summary = run_pending_migrations(clean_db)
 
-    assert summary.applied_count == 34
+    assert summary.applied_count == 35
     assert clean_db.execute_sql(
         "SELECT interaction_synced_at FROM movie WHERE id = %s", (movie.id,)
     ).fetchone()[0] == datetime(2026, 8, 20, 1, 2, 3)

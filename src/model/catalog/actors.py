@@ -64,7 +64,10 @@ _GUARDED_FIELDS = PROTECTED_ACTOR_FIELDS | {
 
 
 class Actor(TimestampedMixin, BaseModel):
-    javdb_id = CaseSensitiveCharField(max_length=64, unique=True, index=True, verbose_name="JavDB ID")
+    # 本地女优没有 JavDB 身份：javdb_id 允许为空；PostgreSQL 唯一约束允许多个 NULL。
+    javdb_id = CaseSensitiveCharField(
+        max_length=64, unique=True, index=True, null=True, verbose_name="JavDB ID"
+    )
     name = peewee.CharField(index=True, verbose_name="演员名字")
     alias_name = peewee.TextField(default="", verbose_name="别名")
     merged_into = peewee.ForeignKeyField(
@@ -121,7 +124,7 @@ class Actor(TimestampedMixin, BaseModel):
             if not only:
                 raise RuntimeError("已持久化 Actor 的 save() 必须传 only")
             self._guard_fields(only)
-        self.javdb_id = (self.javdb_id or "").strip()
+        self.javdb_id = (self.javdb_id or "").strip() or None
         self.name = (self.name or "").strip()
         self.alias_name = (self.alias_name or "").strip()
         if self.display_name_override is not None:

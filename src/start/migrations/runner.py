@@ -60,6 +60,7 @@ TASK_RUN_SCOPE_KEY_MIGRATION_NAME = "20261023_02_add_task_run_scope_key"
 DOWNLOAD_TASK_MANUAL_FIELDS_MIGRATION_NAME = (
     "20261024_01_add_download_task_manual_fields"
 )
+ALLOW_LOCAL_ACTOR_MIGRATION_NAME = "20261025_01_allow_local_actor_without_javdb_id"
 
 
 @dataclass(frozen=True)

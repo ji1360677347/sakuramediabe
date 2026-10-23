@@ -35,8 +35,13 @@ from src.metadata._providers.models import JavdbMovieActorResource
 from src.metadata.factory import build_javdb_provider
 from src.metadata.provider import MetadataNotFoundError
 from src.model import Actor, Image, Movie, MovieActor, MovieTag, Tag, get_database
+from src.model.catalog.actors import (
+    merge_actor_alias_name,
+    split_actor_alias_name,
+)
 from src.model.expressions import year_expression
 from src.schema.catalog.actors import (
+    ActorCreateRequest,
     ActorCupFilterOption,
     ActorDetailResource,
     ActorFilterOptionsResource,
@@ -49,7 +54,10 @@ from src.schema.catalog.actors import (
 )
 from src.schema.catalog.movies import TagResource
 from src.schema.common.pagination import PageResponse
-from src.service.catalog.actor_ownership_gateway import ActorOwnershipGateway
+from src.service.catalog.actor_ownership_gateway import (
+    MANUAL_ACTOR_FIELD_OWNER,
+    ActorOwnershipGateway,
+)
 from src.service.catalog.catalog_import_service import (
     CatalogImportService,
     ImageDownloadError,
@@ -85,6 +93,8 @@ class ActorService:
             "blood_type",
         }
     )
+    # 本地女优没有远端身份，姓名/别名允许人工维护；JavDB 演员仍由同步覆盖。
+    LOCAL_ACTOR_IDENTITY_FIELDS = frozenset({"name", "alias_name"})
 
     FEMALE_GENDER = 1
     MALE_GENDER = 2
@@ -614,6 +624,86 @@ class ActorService:
         return ActorDetailResource.from_actor(actor)
 
     @classmethod
+    def create_local_actor(cls, payload: ActorCreateRequest) -> ActorDetailResource:
+        """创建没有 JavDB 身份的用户自建女优。"""
+        actor = Actor.create(
+            javdb_id=None,
+            name=payload.name,
+            alias_name=merge_actor_alias_name(
+                primary_name=payload.name,
+                alias_names=split_actor_alias_name(payload.alias_name or ""),
+                existing_alias_name="",
+            ),
+            gender=payload.gender,
+            javdb_type=0,
+            # 性别由用户决定，后续性别回填不应覆盖。
+            field_owners={"gender": MANUAL_ACTOR_FIELD_OWNER},
+        )
+        return cls.get_actor_detail(actor.id)
+
+    @classmethod
+    def delete_local_actor(cls, actor_id: int) -> None:
+        """删除用户自建女优；被影片引用或是合并目标时拒绝，避免产生隐式数据损失。"""
+        with get_database().atomic():
+            actor = (
+                Actor.select()
+                .where(Actor.id == actor_id)
+                .for_update()
+                .get_or_none()
+            )
+            if actor is None:
+                raise ApiError(404, "actor_not_found", "演员不存在")
+            if actor.javdb_id is not None:
+                raise ApiError(
+                    422,
+                    "actor_not_local",
+                    "只能删除用户自建的女优",
+                )
+            if actor.merged_into_id is not None:
+                raise ApiError(
+                    422,
+                    "actor_merged",
+                    "该女优已合并到其他演员，无法删除",
+                    {"merged_into_id": actor.merged_into_id},
+                )
+            if (
+                Actor.select(Actor.id)
+                .where(Actor.merged_into == actor.id)
+                .exists()
+            ):
+                raise ApiError(
+                    409,
+                    "actor_in_use",
+                    "该女优是其他演员的合并目标，请先处理合并关系",
+                    {"reason": "merged_target"},
+                )
+            linked_movie_count = (
+                MovieActor.select(MovieActor.id)
+                .where(MovieActor.actor == actor.id)
+                .count()
+            )
+            if linked_movie_count:
+                raise ApiError(
+                    409,
+                    "actor_in_use",
+                    "该女优仍被影片引用，请先从影片中移除",
+                    {"reason": "movie_links", "movie_count": linked_movie_count},
+                )
+            images = {
+                image.id: image
+                for image in (actor.profile_image, actor.profile_image_override)
+                if image is not None
+            }
+            actor.delete_instance()
+
+        obsolete_paths: set[str] = set()
+        for image in images.values():
+            obsolete_paths.update(
+                ImageCleanupService.delete_image_record_if_unused(image)
+            )
+        ImageCleanupService.delete_obsolete_image_files(obsolete_paths)
+
+    @classmethod
     def update_profile(
         cls,
         actor_id: int,
@@ -628,13 +718,35 @@ class ActorService:
         if payload.birthday is not None and payload.birthday > utc_now_for_db().date():
             raise ApiError(422, "invalid_actor_profile", "birthday 不能晚于今天")
 
-        unsupported_fields = set(changes) - cls.ACTOR_PROFILE_EDITABLE_FIELDS
+        editable_fields = (
+            cls.ACTOR_PROFILE_EDITABLE_FIELDS | cls.LOCAL_ACTOR_IDENTITY_FIELDS
+        )
+        unsupported_fields = set(changes) - editable_fields
         if unsupported_fields:
             raise ApiError(
                 422,
                 "invalid_actor_update",
                 "包含不支持修改的女优字段",
                 {"fields": sorted(unsupported_fields)},
+            )
+
+        identity_fields = set(changes) & cls.LOCAL_ACTOR_IDENTITY_FIELDS
+        if identity_fields and actor.javdb_id is not None:
+            raise ApiError(
+                422,
+                "invalid_actor_update",
+                "JavDB 演员的姓名和别名由远端同步维护",
+                {"fields": sorted(identity_fields)},
+            )
+        if identity_fields:
+            effective_name = changes.get("name") or actor.name
+            alias_names = split_actor_alias_name(
+                changes.get("alias_name", actor.alias_name)
+            )
+            changes["alias_name"] = merge_actor_alias_name(
+                primary_name=effective_name,
+                alias_names=alias_names,
+                existing_alias_name="",
             )
 
         assignments = [f"{field} = %s" for field in changes]
@@ -831,6 +943,13 @@ class ActorService:
     @classmethod
     def set_subscription(cls, actor_id: int, subscribed: bool) -> None:
         actor = cls._require_actor(actor_id)
+
+        if subscribed and actor.javdb_id is None:
+            raise ApiError(
+                422,
+                "actor_not_subscribable",
+                "本地女优没有 JavDB 身份，无法订阅",
+            )
 
         if subscribed:
             actor.is_subscribed = True

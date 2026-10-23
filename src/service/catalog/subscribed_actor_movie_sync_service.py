@@ -21,7 +21,11 @@ class SubscribedActorMovieSyncService:
     def sync_subscribed_actor_movies(self, progress_callback=None) -> dict[str, int]:
         actors = list(
             Actor.select()
-            .where(Actor.is_subscribed == True, Actor.merged_into.is_null())
+            .where(
+                Actor.is_subscribed == True,
+                Actor.merged_into.is_null(),
+                Actor.javdb_id.is_null(False),
+            )
             .order_by(Actor.id)
         )
         logger.info("Subscribed actor sync start actors={}", len(actors))
@@ -65,7 +69,11 @@ class SubscribedActorMovieSyncService:
         mode = "full" if actor.subscribed_movies_full_synced_at is None else "incremental"
         merged_sources = list(
             Actor.select(Actor.javdb_id, Actor.javdb_type)
-            .where(Actor.merged_into == actor.id)
+            .where(
+                Actor.merged_into == actor.id,
+                # 本地女优合并后没有 JavDB 身份，不能作为远端同步目标。
+                Actor.javdb_id.is_null(False),
+            )
             .order_by(Actor.id)
         )
         targets = [(actor.javdb_id, actor.javdb_type)]

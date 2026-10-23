@@ -21,6 +21,9 @@ PROTECTED_MOVIE_FIELDS: frozenset[str] = frozenset(
 # 插件显式写入口；host:manual 是保留值，与演员头像共用同一约定）。插件显式写图时
 # 写入 owner，宿主自动刷新只在"没有图的格子"里补图。
 MOVIE_IMAGE_FIELDS: frozenset[str] = frozenset({"cover_image", "plot_images"})
+# 演员表是关系集合而非标量列；用户编辑后 field_owners 用这个保留 key 记为
+# host:manual，元数据刷新看到标记就不再全量替换 movie_actor。
+MOVIE_ACTOR_LIST_FIELD: str = "actors"
 MOVIE_OWNER_TRACKED_FIELDS: frozenset[str] = PROTECTED_MOVIE_FIELDS | MOVIE_IMAGE_FIELDS
 
 # 受保护字段 codec：字段名 -> 接受的值类型；开放写入前必须补上（v2-lite 文档约定）。

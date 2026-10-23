@@ -113,7 +113,7 @@ class SimilarMovieListItemResource(MovieListItemResource):
 
 class MovieActorResource(SchemaModel):
     id: int
-    javdb_id: str = Field()
+    javdb_id: str | None = None
     name: str
     alias_name: str = Field()
     display_name: str
@@ -175,6 +175,8 @@ class MovieRankingResource(SchemaModel):
 
 class MovieDetailResource(MovieListItemResource):
     actors: list[MovieActorResource]
+    # 演员表被人工编辑后为 True：元数据刷新不会再覆盖演员关联，直到用户恢复自动管理。
+    is_actors_manually_managed: bool = False
     tags: list[TagResource]
     summary: str
     maker_name: str | None = None

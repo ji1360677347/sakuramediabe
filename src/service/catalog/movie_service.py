@@ -51,6 +51,7 @@ from src.model import (
     Tag,
     get_database,
 )
+from src.model.catalog.movies import MOVIE_ACTOR_LIST_FIELD
 from src.plugins.provider_protocol import (
     MEDIA_PROVIDER_REGISTRY,
     ProviderOperationError,
@@ -85,7 +86,10 @@ from src.schema.catalog.movies import (
 )
 from src.schema.common.pagination import PageResponse
 from src.service.catalog.movie_list_media_service import attach_movie_list_media
-from src.service.catalog.movie_ownership_gateway import MovieOwnershipGateway
+from src.service.catalog.movie_ownership_gateway import (
+    MANUAL_MOVIE_FIELD_OWNER,
+    MovieOwnershipGateway,
+)
 from src.service.catalog.movie_resolution_service import resolution_exists_expression
 from src.service.catalog.rating_service import RatingService
 from src.service.collections import PlaylistService
@@ -868,6 +872,10 @@ class MovieService:
         ]
 
         movie.actors = MovieService._actors(movie)
+        movie.is_actors_manually_managed = (
+            (movie.field_owners or {}).get(MOVIE_ACTOR_LIST_FIELD)
+            == MANUAL_MOVIE_FIELD_OWNER
+        )
         movie.tags = tags
         movie.plot_images = MovieService._plot_images(movie)
         movie.media_items = MovieService._media_items(movie)

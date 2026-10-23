@@ -36,7 +36,8 @@ class ImageResource(SchemaModel):
 
 class ActorResource(SchemaModel):
     id: int
-    javdb_id: str
+    # JavDB 演员为远端 ID；用户自建女优没有远端身份，保持 None。
+    javdb_id: str | None = None
     name: str
     alias_name: str
     display_name: str
@@ -102,7 +103,40 @@ def _actor_resource_payload(actor) -> dict:
     }
 
 
+class ActorCreateRequest(SchemaModel):
+    """创建用户自建女优；没有 JavDB 身份，默认按女优处理。"""
+
+    name: str = Field(min_length=1, max_length=255)
+    alias_name: str | None = Field(default=None, max_length=1024)
+    gender: int = 1
+
+    @field_validator("name", mode="before")
+    @classmethod
+    def normalize_name(cls, value):
+        if not isinstance(value, str):
+            return value
+        return value.strip()
+
+    @field_validator("alias_name", mode="before")
+    @classmethod
+    def normalize_alias_name(cls, value):
+        if value is None or not isinstance(value, str):
+            return value
+        normalized = value.strip()
+        return normalized or None
+
+    @field_validator("gender")
+    @classmethod
+    def validate_gender(cls, value):
+        if value not in {0, 1, 2}:
+            raise ValueError("gender 必须是 0、1 或 2")
+        return value
+
+
 class ActorUpdateRequest(SchemaModel):
+    # name / alias_name 只允许本地女优修改，JavDB 演员由远端同步维护。
+    name: str | None = Field(default=None, max_length=255)
+    alias_name: str | None = Field(default=None, max_length=1024)
     display_name_override: str | None = Field(default=None, max_length=255)
     gender: int | None = None
     birthday: date | None = None
@@ -115,6 +149,8 @@ class ActorUpdateRequest(SchemaModel):
     blood_type: str | None = Field(default=None, max_length=255)
 
     @field_validator(
+        "name",
+        "alias_name",
         "display_name_override",
         "birthplace",
         "blood_type",
@@ -150,6 +186,8 @@ class ActorUpdateRequest(SchemaModel):
     def validate_explicit_gender(self):
         if "gender" in self.model_fields_set and self.gender is None:
             raise ValueError("gender 不能为 null，未知请使用 0")
+        if "name" in self.model_fields_set and self.name is None:
+            raise ValueError("name 不能为空")
         return self
 
 

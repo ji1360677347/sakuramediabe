@@ -36,6 +36,7 @@ from src.schema.catalog.subtitles import MovieSubtitleListResource
 from src.schema.common.pagination import PageResponse
 from src.schema.system.jobs import ManualJobTriggerResponse
 from src.service.catalog import (
+    MovieActorService,
     MovieMetadataRefreshService,
     MovieService,
     MovieSubtitleService,
@@ -263,6 +264,33 @@ def refresh_movie_metadata(
 )
 def recompute_movie_heat(movie_number: str):
     return MovieTaskService.recompute_movie_heat(movie_number)
+
+
+@router.put(
+    "/{movie_number}/actors/{actor_id}", status_code=status.HTTP_204_NO_CONTENT
+)
+def add_movie_actor(movie_number: str, actor_id: int):
+    """幂等加入演员；首次编辑后影片演员表转为人工管理。"""
+    MovieActorService.add_actor(movie_number, actor_id)
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+@router.delete(
+    "/{movie_number}/actors/{actor_id}", status_code=status.HTTP_204_NO_CONTENT
+)
+def remove_movie_actor(movie_number: str, actor_id: int):
+    """幂等移除演员；首次编辑后影片演员表转为人工管理。"""
+    MovieActorService.remove_actor(movie_number, actor_id)
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+@router.post(
+    "/{movie_number}/actors/reset", status_code=status.HTTP_204_NO_CONTENT
+)
+def reset_movie_actor_ownership(movie_number: str):
+    """恢复演员表自动管理；下一次元数据刷新会重新同步远端演员。"""
+    MovieActorService.reset_ownership(movie_number)
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
 @router.get("/{movie_number}/merged-playback", response_model=MovieMergedPlaybackResource)

@@ -4,6 +4,7 @@ from src.api.exception.errors import ApiError
 from src.api.routers._utils import sse_streaming_response, to_sse_event
 from src.api.routers.deps import db_deps, get_current_user
 from src.schema.catalog.actors import (
+    ActorCreateRequest,
     ActorDetailResource,
     ActorFilterOptionsResource,
     ActorListGender,
@@ -69,6 +70,17 @@ def list_actors(
     )
 
 
+@router.post(
+    "",
+    response_model=ActorDetailResource,
+    response_model_by_alias=False,
+    status_code=status.HTTP_201_CREATED,
+)
+def create_local_actor(payload: ActorCreateRequest):
+    """创建没有 JavDB 身份的用户自建女优。"""
+    return ActorService.create_local_actor(payload)
+
+
 @router.get(
     "/filter-options",
     response_model=ActorFilterOptionsResource,
@@ -102,6 +114,13 @@ def create_actor_metadata_import(
 )
 def get_actor(actor_id: int):
     return ActorService.get_actor_detail(actor_id)
+
+
+@router.delete("/{actor_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_local_actor(actor_id: int):
+    """删除用户自建女优；仍被影片引用或作为合并目标时拒绝。"""
+    ActorService.delete_local_actor(actor_id)
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
 @router.patch(

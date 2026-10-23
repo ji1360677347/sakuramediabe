@@ -2,6 +2,7 @@ from .actor_gender_backfill_service import ActorGenderBackfillService
 from .actor_merge_service import ActorMergeService
 from .actor_service import ActorService
 from .catalog_import_service import CatalogImportService, ImageDownloadError
+from .movie_actor_service import MovieActorService
 from .movie_heat_service import MovieHeatService
 from .movie_interaction_sync_service import MovieInteractionSyncService
 from .movie_metadata_refresh_service import MovieMetadataRefreshService
@@ -21,6 +22,7 @@ __all__ = [
     "ActorService",
     "CatalogImportService",
     "ImageDownloadError",
+    "MovieActorService",
     "MovieHeatService",
     "MovieInteractionSyncService",
     "MovieMetadataRefreshService",

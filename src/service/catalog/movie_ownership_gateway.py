@@ -19,6 +19,7 @@ import json
 from typing import Any
 
 from src.model.catalog.movies import (
+    MOVIE_ACTOR_LIST_FIELD,
     MOVIE_FIELD_CODECS,
     MOVIE_IMAGE_FIELDS,
     MOVIE_OWNER_TRACKED_FIELDS,
@@ -185,6 +186,37 @@ class MovieOwnershipGateway:
             [*fields.values(), owner_payload, *movie_ids],
         )
         return cursor.rowcount
+
+    @classmethod
+    def take_actor_list_ownership(cls, movie_id: int) -> bool:
+        """用户编辑演员表后取得人工 owner，后续自动刷新不再替换关联。"""
+        cursor = Movie._meta.database.execute_sql(
+            f"""
+            UPDATE {Movie._meta.table_name}
+            SET field_owners = field_owners || %s::jsonb,
+                updated_at = now()
+            WHERE id = %s
+            """,
+            (
+                json.dumps({MOVIE_ACTOR_LIST_FIELD: MANUAL_MOVIE_FIELD_OWNER}),
+                movie_id,
+            ),
+        )
+        return cursor.rowcount == 1
+
+    @classmethod
+    def release_actor_list_ownership(cls, movie_id: int) -> bool:
+        """恢复自动管理：摘掉演员表 owner，下一次元数据刷新可重新同步。"""
+        cursor = Movie._meta.database.execute_sql(
+            f"""
+            UPDATE {Movie._meta.table_name}
+            SET field_owners = field_owners - %s,
+                updated_at = now()
+            WHERE id = %s
+            """,
+            (MOVIE_ACTOR_LIST_FIELD, movie_id),
+        )
+        return cursor.rowcount == 1
 
     @classmethod
     def release_plugin_owners(

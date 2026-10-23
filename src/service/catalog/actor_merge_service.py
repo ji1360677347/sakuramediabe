@@ -55,6 +55,15 @@ class ActorMergeService:
                 )
 
             if active_sources:
+                if target.javdb_id is None and any(
+                    source.javdb_id is not None for source in active_sources
+                ):
+                    raise ApiError(
+                        422,
+                        "invalid_actor_merge",
+                        "不能把 JavDB 演员合并到本地女优",
+                        {"reason": "remote_into_local_target"},
+                    )
                 cls._apply_merge(target, active_sources)
 
         return ActorService.get_actor_detail(target.id)
