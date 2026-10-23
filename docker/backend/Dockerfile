@@ -8,7 +8,7 @@ RUN pip install --no-cache-dir --prefix=/install -r requirements.txt
 # SAKURAMEDIA_BUNDLED_PLUGINS 默认 0：本地手动 docker build 不下载任何插件，
 # /app/bundled-plugins 只是空目录，容器启动时的内置安装步骤自动跳过。
 # 版本不写死：构建期取各插件仓库的 latest 正式 Release；需要复现历史镜像时用
-# SAKURAMEDIA_BUNDLED_PLUGIN_PINS="sakuramedia_115_provider=v0.2.14" 固定单个插件。
+# SAKURAMEDIA_BUNDLED_PLUGIN_PINS="sakuramedia_local_provider=v0.2.6" 固定单个插件。
 FROM python:3.10-slim-bookworm@sha256:68d914ec641a0b69267ce65184d000a2bc3a9ee2590ab702b82250ab2385735a AS bundled
 ARG SAKURAMEDIA_BUNDLED_PLUGINS=0
 ARG SAKURAMEDIA_BUNDLED_PLUGIN_PINS=""
@@ -62,7 +62,7 @@ RUN chmod +x /docker-entrypoint.sh \
     && useradd --create-home --shell /bin/bash --gid app app
 
 COPY docker/backend/supervisord.conf /etc/supervisor/supervisord.conf
-# 内置插件包：本地构建为空目录（安装步骤跳过），CI 发布构建为 5 个已校验的 ZIP + 索引。
+# 内置插件包：本地构建为空目录（安装步骤跳过），CI 发布构建为 3 个已校验的 ZIP + 索引。
 COPY --from=bundled /bundled /app/bundled-plugins
 COPY src /app/src
 RUN chmod -R a+rX /app/src /app/bundled-plugins
