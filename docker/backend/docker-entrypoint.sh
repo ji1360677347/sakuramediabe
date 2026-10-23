@@ -88,6 +88,13 @@ bootstrap_default_data() {
     su -s /bin/bash -c "cd \"${APP_ROOT}\" && PYTHONPATH=\"${APP_ROOT}\" \"${PYTHON_BIN}\" -m src.start.commands initdb" "${APP_USER}"
 }
 
+install_bundled_plugins() {
+    echo "Installing bundled official plugins..."
+    # 镜像内置插件只在 /data/plugins/<id> 不存在时安装；已存在的目录一律跳过（不覆盖代码与 data/）。
+    # 单个插件失败只落盘记录，命令本身保持成功，不让内置插件阻断容器启动。
+    su -s /bin/bash -c "cd \"${APP_ROOT}\" && PYTHONPATH=\"${APP_ROOT}\" \"${PYTHON_BIN}\" -m src.start.commands plugins install-bundled" "${APP_USER}"
+}
+
 sync_plugin_dependencies() {
     echo "Syncing plugin dependencies..."
     # 必须在 supervisor 启动 api/aps 前串行执行：两者都会在 import 期加载插件。
@@ -106,6 +113,10 @@ if [ "${1:-}" = "start" ]; then
     wait_for_database
     run_database_migrations
     bootstrap_default_data
+    # 内置插件是便捷预装：整步失败也只告警继续启动，不能把服务卡在启动阶段。
+    if ! install_bundled_plugins; then
+        echo "WARNING: bundled plugin installation failed, continuing startup" >&2
+    fi
     sync_plugin_dependencies
     validate_plugin_installation
 

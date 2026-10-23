@@ -14,6 +14,7 @@ from src.config.config import settings
 from src.metadata.factory import build_javdb_provider
 from src.metadata.provider import MetadataNotFoundError, MetadataRequestError
 from src.model import init_database
+from src.plugins.bundled import DEFAULT_BUNDLE_DIR
 from src.plugins.manager import PluginManager
 from src.service.catalog import MovieThinCoverBackfillService
 from src.service.system import TaskRunConflictError
@@ -495,6 +496,38 @@ def plugins_sync_dependencies():
     )
     for plugin_id, message in failures.items():
         click.echo(f"插件 {plugin_id} {message}")
+
+
+@plugins_group.command("install-bundled", hidden=True)
+@click.option(
+    "--bundle-dir",
+    type=click.Path(path_type=Path),
+    default=str(DEFAULT_BUNDLE_DIR),
+    show_default=True,
+    help="镜像内内置插件目录（含 official-plugins.json）。",
+)
+def plugins_install_bundled(bundle_dir: Path):
+    """启动前安装镜像内置的官方插件：只装不覆盖，失败不阻断启动。"""
+    from src.config.config import ensure_runtime_config
+    from src.plugins.bundled import BundledPluginError, install_bundled_plugins
+
+    # enabled 列表要写进 config.toml，先确保运行配置已落盘。
+    ensure_runtime_config()
+    try:
+        result = install_bundled_plugins(bundle_dir)
+    except BundledPluginError as exc:
+        # 索引损坏是镜像自身缺陷：记日志后继续启动，避免内置插件把服务卡死。
+        logger.error("Bundled plugin index unusable, skip bundled install: {}", exc)
+        return
+    if not result.index_available:
+        logger.info("No bundled plugin index under {}, skip bundled install", bundle_dir)
+        return
+    logger.info(
+        "Bundled plugins installed={} skipped_existing={} failed={}",
+        list(result.installed),
+        list(result.skipped_existing),
+        dict(result.failed),
+    )
 
 
 @plugins_group.command("validate-installation", hidden=True)
