@@ -5,7 +5,6 @@ from __future__ import annotations
 from typing import Any
 
 from loguru import logger
-from peewee import IntegrityError
 
 from src.api.exception.errors import ApiError
 from src.common.media_import_status import (
@@ -27,7 +26,7 @@ from src.schema.transfers.media_import import (
 )
 from src.service.system import ActivityService
 from src.service.transfers.shared.import_notifications import create_new_media_reminder
-from src.service.transfers.shared.write_mutex import library_import_mutex_key
+from src.service.transfers.shared.write_scope import library_import_scope_key
 
 
 class ImportTaskService:
@@ -48,50 +47,62 @@ class ImportTaskService:
         download_task_id: int | None = None,
         task_name: str | None = None,
         plugin_id: str | None = None,
+        allowed_download_statuses: set[str] | None = None,
     ):
         request, library = cls._validated_request(request)
-        mutex_key = library_import_mutex_key(library=library)
-        params = request.model_dump()
-        params["download_task_id"] = download_task_id
-        if plugin_id is not None:
-            # 归属标记只给插件门面回读自己的任务用，不参与导入语义。
-            params["plugin_id"] = plugin_id
+        scope_key = library_import_scope_key(library=library)
         try:
-            download_task = (
-                DownloadTask.get_by_id(download_task_id)
-                if download_task_id is not None
-                else None
-            )
-            if download_task is not None:
-                # 下载任务导入只认准该任务的目标番号，资源包里的其它番号一律忽略。
-                params["target_movie_number"] = download_task.movie
             with get_database().atomic():
+                download_task = None
+                if download_task_id is not None:
+                    # 锁定下载任务再裁决，避免并发提交为同一任务建出两个导入任务。
+                    download_task = (
+                        DownloadTask.select()
+                        .where(DownloadTask.id == download_task_id)
+                        .for_update()
+                        .get_or_none()
+                    )
+                    if download_task is None:
+                        raise ApiError(
+                            404, "download_task_not_found", "下载任务不存在"
+                        )
+                    if (
+                        allowed_download_statuses is not None
+                        and download_task.import_status
+                        not in allowed_download_statuses
+                    ):
+                        raise ApiError(
+                            409,
+                            "download_task_import_conflict",
+                            "该任务的导入已完成或正在进行",
+                            {
+                                "task_id": download_task.id,
+                                "import_status": download_task.import_status,
+                            },
+                        )
+                params = request.model_dump()
+                params["download_task_id"] = download_task_id
+                if plugin_id is not None:
+                    # 归属标记只给插件门面回读自己的任务用，不参与导入语义。
+                    params["plugin_id"] = plugin_id
+                if download_task is not None:
+                    # 下载任务导入只认准该任务的目标番号，资源包里的其它番号一律忽略。
+                    params["target_movie_number"] = download_task.movie
                 task_run = ActivityService.create_task_run(
                     task_key=cls.TASK_KEY,
                     task_name=task_name or cls._task_name(request),
                     trigger_type=trigger_type,
-                    mutex_key=mutex_key,
+                    scope_key=scope_key,
                     params=params,
                 )
                 if download_task is not None:
-                    download_task.import_status = IMPORT_STATUS_RUNNING
-                    download_task.import_task_run = task_run
-                    download_task.save(
-                        only=[DownloadTask.import_status, DownloadTask.import_task_run]
-                    )
-        except IntegrityError as exc:
-            blocking = ActivityService.find_task_run_by_mutex_key(mutex_key)
-            raise ApiError(
-                409,
-                "import_task_conflict",
-                "同一媒体库已有导入任务",
-                {"blocking_task_run_id": blocking.id if blocking else None},
-            ) from exc
+                    DownloadTask.update(
+                        import_status=IMPORT_STATUS_RUNNING,
+                        import_task_run=task_run,
+                    ).where(DownloadTask.id == download_task.id).execute()
+        except ApiError:
+            raise
         except Exception as exc:
-            if download_task_id is not None:
-                DownloadTask.update(import_status=IMPORT_STATUS_FAILED).where(
-                    DownloadTask.id == download_task_id
-                ).execute()
             raise ApiError(
                 502,
                 "import_task_create_failed",
@@ -142,46 +153,37 @@ class ImportTaskService:
             "download_tasks": batch_items,
             "library_id": library.id,
         }
-        mutex_key = library_import_mutex_key(library=library)
+        scope_key = library_import_scope_key(library=library)
         task_name = (
             f"下载任务重新导入（{len(batch_items)}个）"
             if trigger_type == "manual"
             else f"下载任务连续导入（{len(batch_items)}个）"
         )
-        try:
-            with get_database().atomic():
-                task_run = ActivityService.create_task_run(
-                    task_key=cls.TASK_KEY,
-                    task_name=task_name,
-                    trigger_type=trigger_type,
-                    mutex_key=mutex_key,
-                    params=params,
+        with get_database().atomic():
+            task_run = ActivityService.create_task_run(
+                task_key=cls.TASK_KEY,
+                task_name=task_name,
+                trigger_type=trigger_type,
+                scope_key=scope_key,
+                params=params,
+            )
+            updated_count = (
+                DownloadTask.update(
+                    import_status=IMPORT_STATUS_RUNNING,
+                    import_task_run=task_run,
                 )
-                updated_count = (
-                    DownloadTask.update(
-                        import_status=IMPORT_STATUS_RUNNING,
-                        import_task_run=task_run,
-                    )
-                    .where(
-                        DownloadTask.id.in_([task.id for task in download_tasks]),
-                        DownloadTask.import_status.in_(tuple(allowed_statuses)),
-                    )
-                    .execute()
+                .where(
+                    DownloadTask.id.in_([task.id for task in download_tasks]),
+                    DownloadTask.import_status.in_(tuple(allowed_statuses)),
                 )
-                if updated_count != len(download_tasks):
-                    raise ApiError(
-                        409,
-                        "download_task_import_conflict",
-                        "部分下载任务已被其它导入任务占用",
-                    )
-        except IntegrityError as exc:
-            blocking = ActivityService.find_task_run_by_mutex_key(mutex_key)
-            raise ApiError(
-                409,
-                "import_task_conflict",
-                "同一媒体库已有导入任务",
-                {"blocking_task_run_id": blocking.id if blocking else None},
-            ) from exc
+                .execute()
+            )
+            if updated_count != len(download_tasks):
+                raise ApiError(
+                    409,
+                    "download_task_import_conflict",
+                    "部分下载任务已被其它导入任务占用",
+                )
 
     @classmethod
     def list_failed_items(cls, task_run_id: int) -> list[ImportFailedItemResource]:
@@ -219,56 +221,46 @@ class ImportTaskService:
 
         # 入队即校验候选格式与插件启用状态，避免用户拿到一个必然失败的任务。
         MovieMetadataSearchService.resolve_candidate_reference(candidate_id)
-        mutex_key = None
-        try:
-            with get_database().atomic():
-                task_run = cls._lock_import_task_run(task_run_id)
-                cls._ensure_retryable_task(task_run)
-                item = cls._find_failure_item(task_run, item_id)
-                cls._ensure_searchable_failure_item(item)
-                source_ref = item.get("source_ref")
-                if not isinstance(source_ref, dict) or not source_ref:
-                    raise ApiError(409, "failed_item_source_unavailable", "失败项的源文件信息已不可用")
-                library_id = item.get("library_id")
-                if not isinstance(library_id, int) or isinstance(library_id, bool):
-                    raise ApiError(409, "failed_item_source_unavailable", "失败项缺少媒体库信息")
-                library = MediaLibrary.get_or_none(MediaLibrary.id == library_id)
-                if library is None:
-                    raise ApiError(404, "media_library_not_found", "媒体库不存在")
-                if library.provider_key == "":
-                    raise ApiError(422, "invalid_media_library_provider", "媒体库缺少 provider_key")
-                mutex_key = library_import_mutex_key(library=library)
-                params = {
-                    "mode": "retry_failed_file",
-                    "original_task_run_id": task_run.id,
-                    "failure_item_id": item_id,
-                    "failure_item": dict(item),
-                    "candidate_id": candidate_id,
-                }
-                retry_task_run = ActivityService.create_task_run(
-                    task_key=cls.TASK_KEY,
-                    task_name="JAV失败项重试导入",
-                    trigger_type="manual",
-                    mutex_key=mutex_key,
-                    params=params,
-                )
-                cls._replace_failure_item(
-                    task_run,
-                    item_id,
-                    {
-                        "state": "queued",
-                        "retry_task_run_id": retry_task_run.id,
-                        "last_retry_error": None,
-                    },
-                )
-        except IntegrityError as exc:
-            blocking = ActivityService.find_task_run_by_mutex_key(mutex_key)
-            raise ApiError(
-                409,
-                "import_task_conflict",
-                "同一媒体库已有导入任务",
-                {"blocking_task_run_id": blocking.id if blocking else None},
-            ) from exc
+        with get_database().atomic():
+            task_run = cls._lock_import_task_run(task_run_id)
+            cls._ensure_retryable_task(task_run)
+            item = cls._find_failure_item(task_run, item_id)
+            cls._ensure_searchable_failure_item(item)
+            source_ref = item.get("source_ref")
+            if not isinstance(source_ref, dict) or not source_ref:
+                raise ApiError(409, "failed_item_source_unavailable", "失败项的源文件信息已不可用")
+            library_id = item.get("library_id")
+            if not isinstance(library_id, int) or isinstance(library_id, bool):
+                raise ApiError(409, "failed_item_source_unavailable", "失败项缺少媒体库信息")
+            library = MediaLibrary.get_or_none(MediaLibrary.id == library_id)
+            if library is None:
+                raise ApiError(404, "media_library_not_found", "媒体库不存在")
+            if library.provider_key == "":
+                raise ApiError(422, "invalid_media_library_provider", "媒体库缺少 provider_key")
+            scope_key = library_import_scope_key(library=library)
+            params = {
+                "mode": "retry_failed_file",
+                "original_task_run_id": task_run.id,
+                "failure_item_id": item_id,
+                "failure_item": dict(item),
+                "candidate_id": candidate_id,
+            }
+            retry_task_run = ActivityService.create_task_run(
+                task_key=cls.TASK_KEY,
+                task_name="JAV失败项重试导入",
+                trigger_type="manual",
+                scope_key=scope_key,
+                params=params,
+            )
+            cls._replace_failure_item(
+                task_run,
+                item_id,
+                {
+                    "state": "queued",
+                    "retry_task_run_id": retry_task_run.id,
+                    "last_retry_error": None,
+                },
+            )
         return ImportAcceptedResponse(
             task_run_id=retry_task_run.id,
             task_key=retry_task_run.task_key,

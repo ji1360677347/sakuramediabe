@@ -188,7 +188,7 @@ def test_enqueue_video_creates_plugin_triggered_import_task(test_db, tmp_path):
     assert task_run.params["collection_id"] == collection.collection_id
 
 
-def test_enqueue_rejects_jav_collection_and_conflicting_library(test_db, tmp_path):
+def test_enqueue_rejects_jav_collection_and_queues_same_library(test_db, tmp_path):
     library = _library("冲突库")
     api = PluginContext("import_demo", {}, tmp_path).imports
 
@@ -200,21 +200,28 @@ def test_enqueue_rejects_jav_collection_and_conflicting_library(test_db, tmp_pat
             collection_id=1,
         )
 
-    accepted = api.enqueue(
+    first = api.enqueue(
         media_kind="video",
         library=library.id,
         source_ref={"kind": "manual_source", "relative_path": "clip.mp4"},
     )
-    assert accepted.state == "pending"
+    assert first.state == "pending"
 
-    with pytest.raises(ApiError) as caught:
-        api.enqueue(
-            media_kind="video",
-            library=library.id,
-            source_ref={"kind": "manual_source", "relative_path": "other.mp4"},
-        )
-    assert caught.value.status_code == 409
-    assert caught.value.code == "import_task_conflict"
+    queued = api.enqueue(
+        media_kind="video",
+        library=library.id,
+        source_ref={"kind": "manual_source", "relative_path": "other.mp4"},
+    )
+    assert queued.state == "pending"
+    assert queued.task_run_id != first.task_run_id
+
+    runs = list(
+        BackgroundTaskRun.select()
+        .where(BackgroundTaskRun.scope_key == f"library_import:{library.id}")
+        .order_by(BackgroundTaskRun.id.asc())
+    )
+    assert [run.id for run in runs] == [first.task_run_id, queued.task_run_id]
+    assert {run.state for run in runs} == {"pending"}
 
 
 def test_enqueue_requires_provider_source_ref(test_db, tmp_path):

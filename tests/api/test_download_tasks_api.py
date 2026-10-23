@@ -355,9 +355,9 @@ def test_batch_import_groups_tasks_by_library(client, account_user):
     assert response.json()["accepted_count"] == 2
     # 每个媒体库各自一个批量任务运行；跨库分组失败会在入队时报错而不是静默合并。
     runs = list(
-        BackgroundTaskRun.select().where(BackgroundTaskRun.mutex_key.is_null(False))
+        BackgroundTaskRun.select().where(BackgroundTaskRun.scope_key.is_null(False))
     )
-    assert {run.mutex_key for run in runs} == {
+    assert {run.scope_key for run in runs} == {
         f"library_import:{first_client.library_id}",
         f"library_import:{second_client.library_id}",
     }
@@ -401,7 +401,7 @@ def test_batch_import_returns_zero_when_nothing_retryable(client, account_user):
     assert body["skipped_task_ids"] == [done.id]
 
 
-def test_batch_import_conflicts_when_library_busy(client, account_user):
+def test_batch_import_queues_when_library_busy(client, account_user):
     token = _login(client, account_user.username)
     download_client = _seed_batch_client("batch-busy-lib")
     first = _seed_batch_task(download_client, index=1)
@@ -416,8 +416,18 @@ def test_batch_import_conflicts_when_library_busy(client, account_user):
         headers=_auth(token),
     )
 
-    assert response.status_code == 409, response.text
-    assert response.json()["error"]["code"] == "import_task_conflict"
+    assert response.status_code == 202, response.text
+    assert response.json()["accepted_count"] == 1
+    runs = list(
+        BackgroundTaskRun.select()
+        .where(
+            BackgroundTaskRun.scope_key
+            == f"library_import:{download_client.library_id}"
+        )
+        .order_by(BackgroundTaskRun.id.asc())
+    )
+    assert len(runs) == 2
+    assert {run.state for run in runs} == {"pending"}
 
 
 def test_batch_import_rejects_empty_task_ids(client, account_user):

@@ -145,6 +145,8 @@ class TaskQueueService:
 
         SKIP LOCKED 保证多 worker 并发领取互不阻塞、也不会重复领取同一行。
         include/exclude 供并发道（lane）按 task_key 划分领取范围。
+        带 ``scope_key`` 的行按 scope 串行：同 scope 已有 running 时保持 pending 排队，
+        不同 scope 不受影响。
         """
         current = utc_now_for_db()
         conditions = [
@@ -158,6 +160,16 @@ class TaskQueueService:
             conditions.append(
                 BackgroundTaskRun.task_key.not_in(tuple(exclude_task_keys))
             )
+        # 同 scope 已有 running 行时，后续 pending 行保持排队；不同 scope 可继续领取。
+        active_scope = BackgroundTaskRun.alias("active_scope")
+        conditions.append(
+            ~fn.EXISTS(
+                active_scope.select(active_scope.id).where(
+                    (active_scope.state == "running")
+                    & (active_scope.scope_key == BackgroundTaskRun.scope_key)
+                )
+            )
+        )
         candidate = (
             BackgroundTaskRun.select(BackgroundTaskRun.id)
             .where(*conditions)
@@ -165,18 +177,23 @@ class TaskQueueService:
             .limit(1)
             .for_update("FOR UPDATE SKIP LOCKED")
         )
-        with get_database().atomic():
-            claimed = list(
-                BackgroundTaskRun.update(
-                    state="running",
-                    started_at=fn.COALESCE(BackgroundTaskRun.started_at, current),
-                    lease_expires_at=current + timedelta(seconds=lease_seconds),
-                    updated_at=current,
+        try:
+            with get_database().atomic():
+                claimed = list(
+                    BackgroundTaskRun.update(
+                        state="running",
+                        started_at=fn.COALESCE(BackgroundTaskRun.started_at, current),
+                        lease_expires_at=current + timedelta(seconds=lease_seconds),
+                        updated_at=current,
+                    )
+                    .where(BackgroundTaskRun.id.in_(candidate))
+                    .returning(BackgroundTaskRun)
+                    .execute()
                 )
-                .where(BackgroundTaskRun.id.in_(candidate))
-                .returning(BackgroundTaskRun)
-                .execute()
-            )
+        except IntegrityError:
+            # 两个 worker 同时领取同一 scope 时，部分唯一索引只允许一个 running。
+            # 落败者本轮放弃，下一轮会因 NOT EXISTS 过滤掉该行。
+            return None
         if not claimed:
             return None
         return claimed[0]

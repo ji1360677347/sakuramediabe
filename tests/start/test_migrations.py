@@ -53,6 +53,7 @@ from src.start.migrations.runner import (
     PLUGIN_MOVIE_METADATA_MIGRATION_NAME,
     REMOVE_GENERATED_THIN_COVER_MIGRATION_NAME,
     REMOVE_ORPHAN_VIDEO_ITEMS_MIGRATION_NAME,
+    TASK_RUN_SCOPE_KEY_MIGRATION_NAME,
     VIEW_HISTORY_MIGRATION_NAME,
     WIDEN_DOWNLOAD_TITLE_COLUMNS_MIGRATION_NAME,
     MigrationExecution,
@@ -152,6 +153,7 @@ def test_current_migrations_are_discoverable_in_order():
         MOVIE_INTERACTION_SORT_INDEXES_MIGRATION_NAME,
         MOVIE_RATINGS_MIGRATION_NAME,
         ACTOR_GENDER_CHECKED_AT_MIGRATION_NAME,
+        TASK_RUN_SCOPE_KEY_MIGRATION_NAME,
     ]
 
 
@@ -260,6 +262,7 @@ def test_run_pending_migrations_completes_fresh_current_schema_after_model_creat
         ),
         MigrationExecution(name=MOVIE_RATINGS_MIGRATION_NAME, applied=True),
         MigrationExecution(name=ACTOR_GENDER_CHECKED_AT_MIGRATION_NAME, applied=True),
+        MigrationExecution(name=TASK_RUN_SCOPE_KEY_MIGRATION_NAME, applied=True),
     ]
     assert _schema_migration_names(clean_db) == [
         CONSOLIDATED_MIGRATION_NAME,
@@ -295,7 +298,58 @@ def test_run_pending_migrations_completes_fresh_current_schema_after_model_creat
         MOVIE_INTERACTION_SORT_INDEXES_MIGRATION_NAME,
         MOVIE_RATINGS_MIGRATION_NAME,
         ACTOR_GENDER_CHECKED_AT_MIGRATION_NAME,
+        TASK_RUN_SCOPE_KEY_MIGRATION_NAME,
     ]
+
+
+def test_task_run_scope_key_migration_backfills_active_library_tasks(clean_db):
+    clean_db.create_tables([BackgroundTaskRun])
+    single = BackgroundTaskRun.create(
+        task_key="library_import",
+        task_name="single",
+        trigger_type="manual",
+        state="pending",
+        mutex_key="library_import:3",
+        params={"media_kind": "video", "library_id": 3, "source_ref": {}},
+    )
+    retry = BackgroundTaskRun.create(
+        task_key="library_import",
+        task_name="retry",
+        trigger_type="manual",
+        state="running",
+        mutex_key="library_import:4",
+        params={
+            "mode": "retry_failed_file",
+            "failure_item": {"library_id": 4},
+        },
+    )
+    transfer = BackgroundTaskRun.create(
+        task_key="media_storage_transfer",
+        task_name="transfer",
+        trigger_type="manual",
+        state="pending",
+        mutex_key="library_import:5",
+        params={"target_library_id": 5},
+    )
+    completed = BackgroundTaskRun.create(
+        task_key="library_import",
+        task_name="completed",
+        trigger_type="manual",
+        state="completed",
+        params={"library_id": 6},
+    )
+
+    migration = _load_migration_module(
+        Path(f"{TASK_RUN_SCOPE_KEY_MIGRATION_NAME}.py")
+    )
+    migration.migrate(clean_db)
+    migration.migrate(clean_db)
+
+    assert BackgroundTaskRun.get_by_id(single.id).scope_key == "library_import:3"
+    assert BackgroundTaskRun.get_by_id(retry.id).scope_key == "library_import:4"
+    assert BackgroundTaskRun.get_by_id(transfer.id).scope_key == "library_import:5"
+    # 终态行不参与执行互斥，迁移不回填。
+    assert BackgroundTaskRun.get_by_id(completed.id).scope_key is None
 
 
 def test_actor_gender_checked_at_migration_adds_columns_idempotently_and_preserves_rows(
@@ -616,7 +670,7 @@ def test_consolidated_migration_upgrades_v0421_schema_and_preserves_required_mem
         SchemaMigration.create(name=CONSOLIDATED_MIGRATION_NAME)
     summary = run_pending_migrations(clean_db)
 
-    assert summary.applied_count == 32
+    assert summary.applied_count == 33
     assert clean_db.execute_sql(
         "SELECT interaction_synced_at FROM movie WHERE id = %s", (movie.id,)
     ).fetchone()[0] == datetime(2026, 8, 20, 1, 2, 3)

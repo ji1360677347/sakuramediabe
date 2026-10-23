@@ -9,6 +9,8 @@ class BackgroundTaskRun(TimestampedMixin, BaseModel):
     task_name = peewee.CharField(max_length=255)
     trigger_type = peewee.CharField(max_length=32, index=True)
     mutex_key = peewee.CharField(max_length=128, null=True)
+    # 执行作用域名（如 library_import:1）：同 scope 的 pending 行排队，最多一条 running。
+    scope_key = peewee.CharField(max_length=128, null=True)
     state = peewee.CharField(max_length=32, default="pending", index=True)
     progress_current = peewee.IntegerField(null=True)
     progress_total = peewee.IntegerField(null=True)
@@ -31,6 +33,21 @@ class BackgroundTaskRun(TimestampedMixin, BaseModel):
             # 队列领取路径：WHERE state='pending' AND scheduled_at <= now ORDER BY id
             (("state", "scheduled_at"), False),
         )
+
+
+# 数据库裁决同 scope 的执行互斥：pending 行可以任意排队，running 行最多一条。
+BackgroundTaskRun.add_index(
+    peewee.ModelIndex(
+        BackgroundTaskRun,
+        ("scope_key",),
+        unique=True,
+        where=(
+            (BackgroundTaskRun.state == "running")
+            & (BackgroundTaskRun.scope_key.is_null(False))
+        ),
+        name="backgroundtaskrun_running_scope_key",
+    )
+)
 
 
 class SystemNotification(TimestampedMixin, BaseModel):

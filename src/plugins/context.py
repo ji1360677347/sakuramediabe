@@ -1316,7 +1316,7 @@ class ImportApi:
         collection_id: int | None = None,
         source_disposition: str = "keep",
     ) -> PluginImportBatch:
-        """按 provider 引用发起媒体库导入；导入复用宿主任务队列与媒体库互斥。"""
+        """按 provider 引用发起媒体库导入；导入复用宿主任务队列，同媒体库任务按 FIFO 排队。"""
         from src.schema.transfers.media_import import ImportRequest
         from src.service.transfers.shared.import_task_service import ImportTaskService
 

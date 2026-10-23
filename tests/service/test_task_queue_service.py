@@ -94,6 +94,62 @@ def test_claim_next_claims_earliest_due_row_and_sets_lease(test_db):
     assert TaskQueueService.claim_next() is None
 
 
+def test_scope_key_queues_same_scope_and_allows_cross_scope_parallelism(test_db):
+    from src.service.system import ActivityService
+
+    first = ActivityService.create_task_run(
+        task_key="library_import",
+        trigger_type="manual",
+        scope_key="library_import:1",
+        params={"library_id": 1},
+    )
+    second = ActivityService.create_task_run(
+        task_key="library_import",
+        trigger_type="manual",
+        scope_key="library_import:1",
+        params={"library_id": 1},
+    )
+    other = ActivityService.create_task_run(
+        task_key="library_import",
+        trigger_type="manual",
+        scope_key="library_import:2",
+        params={"library_id": 2},
+    )
+
+    claimed_first = TaskQueueService.claim_next()
+    assert claimed_first is not None and claimed_first.id == first.id
+
+    # 同 scope 的第二行保持排队；不同 scope 仍可被另一个 worker 领取。
+    claimed_other = TaskQueueService.claim_next()
+    assert claimed_other is not None and claimed_other.id == other.id
+    assert TaskQueueService.claim_next() is None
+    assert BackgroundTaskRun.get_by_id(second.id).state == "pending"
+
+    ActivityService.complete_task_run(first.id, notify_result=False)
+    claimed_second = TaskQueueService.claim_next()
+    assert claimed_second is not None and claimed_second.id == second.id
+
+
+def test_running_scope_key_is_unique_in_database(test_db):
+    from peewee import IntegrityError
+
+    from src.service.system import ActivityService
+
+    ActivityService.create_task_run(
+        task_key="library_import",
+        trigger_type="manual",
+        state="running",
+        scope_key="library_import:1",
+    )
+    with pytest.raises(IntegrityError):
+        ActivityService.create_task_run(
+            task_key="library_import",
+            trigger_type="manual",
+            state="running",
+            scope_key="library_import:1",
+        )
+
+
 def test_claim_next_skips_future_schedule(test_db):
     queued = TaskQueueService.enqueue(
         task_key="movie_heat_update", trigger_type="scheduled"

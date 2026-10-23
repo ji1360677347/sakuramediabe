@@ -419,11 +419,19 @@ def test_candidates_exclude_libraries_without_target_capability(move, monkeypatc
     assert unsupported.id not in [target.id for target in candidates.targets]
 
 
-def test_enqueue_reuses_existing_target_import_mutex(move):
+def test_enqueue_queues_behind_existing_target_import(move):
     first = enqueue(move)
-    assert first.mutex_key == f"library_import:{move.target_lib.id}"
-    with pytest.raises(Exception, match="已有导入或迁移任务"):
-        enqueue(move)
+    assert first.scope_key == f"library_import:{move.target_lib.id}"
+
+    accepted = Service.enqueue(
+        MediaStorageTransferRequest(
+            media_ids=[move.media.id],
+            target_library_id=move.target_lib.id,
+        )
+    )
+    queued = BackgroundTaskRun.get_by_id(accepted.task_run_id)
+    assert queued.state == "pending"
+    assert queued.scope_key == first.scope_key
 
 
 @pytest.mark.parametrize(

@@ -12,7 +12,8 @@ from src.model import (
     DownloadTask,
     MediaLibrary,
 )
-from src.schema.transfers.media_import import ImportResult
+from src.schema.transfers.media_import import ImportRequest, ImportResult
+from src.service.system.task_queue_service import TaskQueueService
 from src.service.transfers.shared.import_task_service import ImportTaskService
 
 
@@ -282,3 +283,42 @@ def test_recover_interrupted_downloads_only_resets_running_imports_of_failed_run
     assert ImportTaskService.recover_interrupted_downloads() == 1
     assert {task.id: task.import_status for task in DownloadTask.select()} == expected
     assert ImportTaskService.recover_interrupted_downloads() == 0
+
+
+def test_enqueue_queues_multiple_imports_for_same_library(test_db):
+    library = MediaLibrary.create(
+        name="queue", provider_key="test", provider_config={}
+    )
+    first = ImportTaskService.enqueue(
+        ImportRequest(
+            media_kind="video",
+            library_id=library.id,
+            source_ref={"kind": "manual_source", "relative_path": "a.mp4"},
+        )
+    )
+    second = ImportTaskService.enqueue(
+        ImportRequest(
+            media_kind="video",
+            library_id=library.id,
+            source_ref={"kind": "manual_source", "relative_path": "b.mp4"},
+        )
+    )
+
+    assert first.state == "pending"
+    assert second.state == "pending"
+    runs = list(
+        BackgroundTaskRun.select()
+        .where(BackgroundTaskRun.scope_key == f"library_import:{library.id}")
+        .order_by(BackgroundTaskRun.id.asc())
+    )
+    assert [run.id for run in runs] == [first.task_run_id, second.task_run_id]
+
+    claimed = TaskQueueService.claim_next(
+        include_task_keys={ImportTaskService.TASK_KEY}
+    )
+    assert claimed is not None and claimed.id == first.task_run_id
+    # 同库第二个任务保持排队，等第一个完成后才会被领取。
+    assert (
+        TaskQueueService.claim_next(include_task_keys={ImportTaskService.TASK_KEY})
+        is None
+    )

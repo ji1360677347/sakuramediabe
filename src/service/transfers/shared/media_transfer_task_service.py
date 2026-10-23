@@ -6,7 +6,6 @@ from pathlib import Path
 from typing import Any
 
 from loguru import logger
-from peewee import IntegrityError
 
 from src.api.exception.errors import ApiError
 from src.common.runtime_time import utc_now_for_db
@@ -40,7 +39,7 @@ from src.service.playback.operation_locks import (
 )
 from src.service.playback.provider_helpers import library_handle_for, media_handle_for
 from src.service.system import ActivityService
-from src.service.transfers.shared.write_mutex import library_import_mutex_key
+from src.service.transfers.shared.write_scope import library_import_scope_key
 
 
 class MediaTransferTaskService:
@@ -110,21 +109,16 @@ class MediaTransferTaskService:
         summary = MediaStorageTransferResult(
             unexecuted_media_ids=[m.id for m in medias]
         ).model_dump()
-        try:
-            with get_database().atomic():
-                task = ActivityService.create_task_run(
-                    task_key=cls.TASK_KEY,
-                    task_name="媒体存储迁移",
-                    trigger_type="manual",
-                    mutex_key=library_import_mutex_key(library=target),
-                    params=params,
-                )
-                task.result_summary = summary
-                task.save(only=[BackgroundTaskRun.result_summary])
-        except IntegrityError:
-            raise ApiError(
-                409, "media_transfer_conflict", "目标媒体库已有导入或迁移任务"
-            ) from None
+        with get_database().atomic():
+            task = ActivityService.create_task_run(
+                task_key=cls.TASK_KEY,
+                task_name="媒体存储迁移",
+                trigger_type="manual",
+                scope_key=library_import_scope_key(library=target),
+                params=params,
+            )
+            task.result_summary = summary
+            task.save(only=[BackgroundTaskRun.result_summary])
         return MediaStorageTransferAcceptedResponse(
             task_run_id=task.id, task_key=task.task_key, state=task.state
         )

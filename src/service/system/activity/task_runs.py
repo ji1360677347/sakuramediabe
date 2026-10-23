@@ -138,6 +138,7 @@ class TaskRunService:
         trigger_type: str,
         state: str = "pending",
         mutex_key: str | None = None,
+        scope_key: str | None = None,
         params: dict[str, Any] | None = None,
     ) -> BackgroundTaskRun:
         normalized_trigger_type = normalize_allowed_filter(
@@ -154,6 +155,7 @@ class TaskRunService:
                 task_name=cls.resolve_task_name(task_key, task_name),
                 trigger_type=normalized_trigger_type or "internal",
                 mutex_key=normalize_string_filter(mutex_key),
+                scope_key=normalize_string_filter(scope_key),
                 state=normalized_state or "pending",
                 started_at=now() if normalized_state == "running" else None,
                 result_summary={},
