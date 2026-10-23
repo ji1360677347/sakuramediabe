@@ -9,7 +9,9 @@ from src.model import (
     Movie,
 )
 from src.plugins.provider_protocol import ImportFile, ProviderUnavailableError
+from src.service.system.task_queue_service import TaskQueueService
 from src.service.transfers.downloads import task_service
+from src.service.transfers.shared.import_task_service import ImportTaskService
 
 
 def _login(client, username: str) -> str:
@@ -409,6 +411,11 @@ def test_batch_import_queues_when_library_busy(client, account_user):
 
     accepted = client.post(f"/download-tasks/{first.id}/import", headers=_auth(token))
     assert accepted.status_code == 202, accepted.text
+    # 把第一个任务置为 running，后续同库任务必须排队而不是冲突。
+    claimed = TaskQueueService.claim_next(
+        include_task_keys={ImportTaskService.TASK_KEY}
+    )
+    assert claimed is not None
 
     response = client.post(
         "/download-tasks/imports",
@@ -426,8 +433,7 @@ def test_batch_import_queues_when_library_busy(client, account_user):
         )
         .order_by(BackgroundTaskRun.id.asc())
     )
-    assert len(runs) == 2
-    assert {run.state for run in runs} == {"pending"}
+    assert [run.state for run in runs] == ["running", "pending"]
 
 
 def test_batch_import_rejects_empty_task_ids(client, account_user):

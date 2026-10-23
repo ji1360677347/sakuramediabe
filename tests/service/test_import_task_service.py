@@ -2,8 +2,10 @@ from types import SimpleNamespace
 
 import pytest
 
+from src.api.exception.errors import ApiError
 from src.common.media_import_status import (
     IMPORT_STATUS_COMPLETED,
+    IMPORT_STATUS_PENDING,
     IMPORT_STATUS_SKIPPED,
 )
 from src.model import (
@@ -321,4 +323,48 @@ def test_enqueue_queues_multiple_imports_for_same_library(test_db):
     assert (
         TaskQueueService.claim_next(include_task_keys={ImportTaskService.TASK_KEY})
         is None
+    )
+
+
+def test_enqueue_rejects_download_task_already_importing(test_db):
+    library = MediaLibrary.create(
+        name="busy", provider_key="test", provider_config={}
+    )
+    client = DownloadClient.create(name="client", library=library, provider_config={})
+    task = DownloadTask.create(
+        client=client,
+        name="TEST-001",
+        movie="TEST-001",
+        remote_id="busy-import",
+        state="completed",
+        completed_source_ref={"version": 1, "kind": "cloud115_dir", "cid": "1"},
+        import_status=IMPORT_STATUS_PENDING,
+    )
+    request = ImportRequest(
+        media_kind="jav",
+        library_id=library.id,
+        source_ref=task.completed_source_ref,
+    )
+    ImportTaskService.enqueue(
+        request,
+        download_task_id=task.id,
+        allowed_download_statuses={IMPORT_STATUS_PENDING},
+    )
+
+    # 未经接口层预检直接重复入队：事务内锁行读到的状态已变成 running，必须拒绝。
+    with pytest.raises(ApiError) as caught:
+        ImportTaskService.enqueue(
+            request,
+            download_task_id=task.id,
+            allowed_download_statuses={IMPORT_STATUS_PENDING},
+        )
+
+    assert caught.value.status_code == 409
+    assert caught.value.code == "download_task_import_conflict"
+    assert DownloadTask.get_by_id(task.id).import_status == "running"
+    assert (
+        BackgroundTaskRun.select()
+        .where(BackgroundTaskRun.task_key == ImportTaskService.TASK_KEY)
+        .count()
+        == 1
     )

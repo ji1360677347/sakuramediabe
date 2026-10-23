@@ -10,26 +10,21 @@ def migrate(database) -> None:
         "ALTER TABLE background_task_run ADD COLUMN IF NOT EXISTS scope_key VARCHAR(128) NULL"
     )
     # 旧版本在入队时就占 mutex；回填活动行的 scope，避免升级瞬间同库任务失去串行保护。
+    # 失败项重试任务的库 id 只在 failure_item 里，普通导入在顶层 library_id。
     database.execute_sql(
         """
         UPDATE background_task_run
-        SET scope_key = 'library_import:' || (params::jsonb ->> 'library_id')
-        WHERE task_key = 'library_import'
-          AND scope_key IS NULL
-          AND state IN ('pending', 'running')
-          AND NULLIF(params::jsonb ->> 'library_id', '') IS NOT NULL
-        """
-    )
-    database.execute_sql(
-        """
-        UPDATE background_task_run
-        SET scope_key = 'library_import:' || (
+        SET scope_key = 'library_import:' || COALESCE(
+            params::jsonb ->> 'library_id',
             params::jsonb #>> '{failure_item,library_id}'
         )
         WHERE task_key = 'library_import'
           AND scope_key IS NULL
           AND state IN ('pending', 'running')
-          AND NULLIF(params::jsonb #>> '{failure_item,library_id}', '') IS NOT NULL
+          AND NULLIF(COALESCE(
+              params::jsonb ->> 'library_id',
+              params::jsonb #>> '{failure_item,library_id}'
+          ), '') IS NOT NULL
         """
     )
     database.execute_sql(
