@@ -934,7 +934,7 @@ def test_failed_plugin_import_cleans_its_delivery(metadata_env, monkeypatch):
     assert not [p for p in (metadata_env.root / "assets").rglob("*") if p.is_file()]
 
 
-def test_media_import_uses_fallback_and_subscribes_movie(metadata_env, monkeypatch):
+def test_media_import_metadata_prefetch_does_not_subscribe_movie(metadata_env, monkeypatch):
     from src.service.transfers.imports.import_service import MediaImportService
 
     detail = delivery(metadata_env)
@@ -943,8 +943,9 @@ def test_media_import_uses_fallback_and_subscribes_movie(metadata_env, monkeypat
     service._worker_local.metadata_provider = metadata_env.provider
     result = service._import_movie_metadata("TEST-001")
     movie = Movie.get_by_id(result.movie_id)
-    assert movie.javdb_id is None and movie.is_subscribed
-    assert movie.subscribed_at is not None
+    assert movie.javdb_id is None
+    assert movie.is_subscribed is False
+    assert movie.subscribed_at is None
 
 
 def test_ranking_hit_backfills_existing_plugin_movie(metadata_env, monkeypatch):

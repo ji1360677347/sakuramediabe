@@ -137,7 +137,7 @@ class MediaImportService:
             )
 
             movie, _created = MetadataSourceService.import_by_number(
-                movie_number, provider, self.catalog_import_service, force_subscribed=True
+                movie_number, provider, self.catalog_import_service
             )
         except (MetadataNotFoundError, MetadataRequestError, MetadataSourceError) as exc:
             logger.warning("Import metadata fetch failed movie_number={} detail={}", movie_number, exc)
@@ -160,6 +160,20 @@ class MediaImportService:
                 failure_detail=str(exc),
             )
         return MetadataImportResult(movie_number=movie_number, movie_id=movie.id)
+
+    @staticmethod
+    def _subscribe_imported_movie(movie: Movie) -> None:
+        """Finalize 成功后订阅；订阅失败不能回滚已成功的媒体导入。"""
+        try:
+            from src.service.catalog.movie_service import MovieService
+
+            MovieService.set_subscription(movie.movie_number, True)
+        except Exception as exc:
+            logger.warning(
+                "Import subscription failed movie_number={} detail={}",
+                movie.movie_number,
+                exc,
+            )
 
     @contextmanager
     def metadata_import_batch(
@@ -592,6 +606,8 @@ class MediaImportService:
                             media.import_source_identity = import_source_identity
                             media.save(only=[Media.import_source_identity])
                         imported_count += 1
+                        if media_kind == "jav":
+                            self._subscribe_imported_movie(movie)
                         if video is not None and media is not None:
                             self._generate_video_cover(
                                 storage=storage,
@@ -706,12 +722,10 @@ class MediaImportService:
                         detail,
                         metadata_source,
                         metadata_provider,
-                        force_subscribed=True,
                     )
                 else:
                     movie, _created = self.catalog_import_service.import_movie_if_missing(
                         detail,
-                        force_subscribed=True,
                     )
                 media = self._create_media(
                     storage=storage,
@@ -732,6 +746,8 @@ class MediaImportService:
                 storage.finalize_import(receipt=staged.receipt)
             except ProviderOperationError as exc:
                 raise self._provider_error(exc) from exc
+
+            self._subscribe_imported_movie(movie)
 
             get_import_source_identity = getattr(storage, "get_import_source_identity", None)
             if source_disposition in {"keep", "in_place"} and callable(get_import_source_identity):

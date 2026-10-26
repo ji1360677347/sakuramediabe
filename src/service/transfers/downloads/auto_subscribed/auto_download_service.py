@@ -9,7 +9,7 @@ from peewee import fn
 
 from src.api.exception.errors import ApiError
 from src.common.service_helpers import media_exists_expression
-from src.model import DownloadTask, Movie
+from src.model import BackgroundTaskRun, DownloadTask, Media, Movie
 from src.schema.transfers.downloads import DownloadRequestCreateRequest
 from src.service.catalog.movie_subscription_search_state_service import (
     ERROR_CODE_NO_CANDIDATE,
@@ -51,6 +51,23 @@ class SubscribedMovieAutoDownloadService:
             "failed_items": [],
         }
 
+    @staticmethod
+    def _library_import_running() -> bool:
+        from src.service.transfers.shared.import_task_service import ImportTaskService
+
+        return (
+            BackgroundTaskRun.select(BackgroundTaskRun.id)
+            .where(
+                (BackgroundTaskRun.task_key == ImportTaskService.TASK_KEY)
+                & (BackgroundTaskRun.state == "running")
+            )
+            .exists()
+        )
+
+    @staticmethod
+    def _media_exists(movie_number: str) -> bool:
+        return Media.select(Media.id).where(Media.movie == movie_number).exists()
+
     def _process_one(self, shared: dict[str, Any], movie: Movie) -> None:
         movie_number = movie.movie_number
         shared["searched_movies"] += 1
@@ -64,6 +81,11 @@ class SubscribedMovieAutoDownloadService:
 
         candidates = [candidate for candidate in candidates if self._candidate_usable(candidate)]
         candidates.sort(key=lambda candidate: (-candidate.size_bytes, candidate.indexer_name, candidate.title))
+        if self._media_exists(movie_number):
+            # 候选是任务开始时一次性选出的，导入可能在搜索期间已写完 media。
+            shared["skipped_movies"] += 1
+            logger.info("Auto download skipped existing media movie_number={}", movie_number)
+            return
         response = None
         for candidate in candidates[:MAX_REJECTED_CANDIDATES]:
             for client_id in self._candidate_client_ids(candidate):
@@ -154,6 +176,19 @@ class SubscribedMovieAutoDownloadService:
         return client_ids
 
     def run(self, *, reporter) -> dict[str, Any]:
+        if self._library_import_running():
+            logger.info("Auto download skipped reason=library_import_running")
+            summary = self._setup_run()
+            summary.update(
+                {
+                    "candidate_movies": 0,
+                    "failed_movies": 0,
+                    "skipped": True,
+                    "reason": "library_import_running",
+                }
+            )
+            return summary
+
         candidate_ids = self._select_candidate_ids()
         shared = self._setup_run()
         total = len(candidate_ids)

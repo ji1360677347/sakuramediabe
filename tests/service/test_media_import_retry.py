@@ -23,6 +23,7 @@ def test_retry_uses_persisted_file_ref_and_associates_media(test_db, monkeypatch
     )
     events = []
     stored_source = []
+    finalize_observed = []
 
     class Storage:
         def stage_import_file(self, *, source, placement, source_disposition, operation_key):
@@ -37,6 +38,7 @@ def test_retry_uses_persisted_file_ref_and_associates_media(test_db, monkeypatch
         def finalize_import(self, *, receipt):
             assert receipt == staged.receipt
             events.append("finalize")
+            finalize_observed.append(Movie.get_by_id(movie.id).is_subscribed)
 
     monkeypatch.setattr(
         "src.service.catalog.movie_metadata_search_service.MovieMetadataSearchService.fetch_candidate",
@@ -44,9 +46,13 @@ def test_retry_uses_persisted_file_ref_and_associates_media(test_db, monkeypatch
             (SimpleNamespace(movie_number="ABC-001"), "javdb", object(), None)
         ),
     )
-    catalog = SimpleNamespace(
-        import_movie_if_missing=lambda _detail, force_subscribed: (movie, False),
-    )
+    captured_force_subscribed = []
+
+    def import_movie_if_missing(_detail, force_subscribed=False):
+        captured_force_subscribed.append(force_subscribed)
+        return movie, False
+
+    catalog = SimpleNamespace(import_movie_if_missing=import_movie_if_missing)
     failure_item = {
         "source_ref": {"file": "opaque-file"},
         "name": "ABC-001.mp4",
@@ -79,6 +85,12 @@ def test_retry_uses_persisted_file_ref_and_associates_media(test_db, monkeypatch
     )
     assert placement == "jav/ABC-001/ABC-001.mp4"
     assert operation_key == "retry-operation"
+    # 重试不再在 catalog import 阶段强制订阅，而是在 finalize 成功后订阅。
+    assert captured_force_subscribed == [False]
+    assert finalize_observed == [False]
+    stored_movie = Movie.get_by_id(movie.id)
+    assert stored_movie.is_subscribed is True
+    assert stored_movie.subscribed_at is not None
 
 
 def test_retry_in_place_requires_provider_capability(test_db):

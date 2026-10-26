@@ -203,6 +203,7 @@ def test_import_preserves_plugin_finalize_and_abort_contract(test_db, monkeypatc
     )
     staged = _staged()
     events = []
+    finalize_observed = []
 
     class Storage:
         def scan_import_source(self, *, source_ref):
@@ -223,6 +224,7 @@ def test_import_preserves_plugin_finalize_and_abort_contract(test_db, monkeypatc
             assert receipt == staged.receipt
             assert Media.select().count() == 1
             events.append("finalize")
+            finalize_observed.append(Movie.get_by_id(movie.id).is_subscribed)
             if failure_at == "finalize":
                 raise RuntimeError("finalize_failed")
 
@@ -255,3 +257,57 @@ def test_import_preserves_plugin_finalize_and_abort_contract(test_db, monkeypatc
             assert result.failed_count == 0
             assert result.imported_count == 1
             assert events == ["stage", "write", "finalize"]
+
+    stored_movie = Movie.get_by_id(movie.id)
+    if media_kind == "jav" and failure_at is None:
+        # 订阅发生在 finalize 成功之后：finalize 期间仍未订阅。
+        assert finalize_observed == [False]
+        assert stored_movie.is_subscribed is True
+        assert stored_movie.subscribed_at is not None
+    else:
+        assert stored_movie.is_subscribed is False
+
+
+def test_import_survives_subscription_failure_for_blacklisted_movie(test_db, monkeypatch):
+    library = _library()
+    movie = Movie.create(movie_number="TEST-001", title="test", is_blacklisted=True)
+    source = ImportFile(
+        source_ref={"source": "origin"},
+        name="TEST-001.mp4",
+        relative_path="TEST-001.mp4",
+        size_bytes=100,
+        is_video=True,
+    )
+    staged = _staged()
+
+    class Storage:
+        def scan_import_source(self, *, source_ref):
+            return (source,)
+
+        def stage_import_file(self, *, source, placement, source_disposition, operation_key):
+            return staged
+
+        def compute_file_hash(self, *, media):
+            return "f" * 64
+
+        def finalize_import(self, *, receipt):
+            assert receipt == staged.receipt
+
+    monkeypatch.setattr(settings.media, "allowed_min_video_file_size", 0)
+    monkeypatch.setattr(
+        MediaImportService,
+        "metadata_import_batch",
+        lambda _self, _numbers: nullcontext({
+            "TEST-001": SimpleNamespace(result=lambda: SimpleNamespace(movie_id=movie.id)),
+        }),
+    )
+
+    result = MediaImportService(
+        provider=Storage(), catalog_import_service=object()
+    ).import_from_source({"source": "directory"}, library.id, media_kind="jav")
+
+    assert result.failed_count == 0
+    assert result.imported_count == 1
+    assert Media.select().count() == 1
+    # 黑名单影片订阅会 409；helper 吞掉异常，导入本身仍然成功。
+    assert Movie.get_by_id(movie.id).is_subscribed is False
