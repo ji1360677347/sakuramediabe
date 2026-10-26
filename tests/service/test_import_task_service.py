@@ -14,6 +14,11 @@ from src.model import (
     DownloadTask,
     MediaLibrary,
 )
+from src.plugins.provider_protocol import (
+    MEDIA_PROVIDER_REGISTRY,
+    ProviderOperationError,
+    ProviderUnavailableError,
+)
 from src.schema.transfers.media_import import ImportRequest, ImportResult
 from src.service.system.task_queue_service import TaskQueueService
 from src.service.transfers.shared.import_task_service import ImportTaskService
@@ -368,3 +373,146 @@ def test_enqueue_rejects_download_task_already_importing(test_db):
         .count()
         == 1
     )
+
+
+class _OverlapStorage:
+    def validate_import_source(self, *, source_ref, source_disposition):
+        raise ProviderOperationError(
+            provider_key="local",
+            operation="validate_import_source",
+            code="invalid_config",
+            safe_message="导入源与媒体库目录重叠",
+            retryable=False,
+        )
+
+
+def _enqueue_library(name: str) -> MediaLibrary:
+    return MediaLibrary.create(name=name, provider_key="test", provider_config={})
+
+
+def test_enqueue_rejects_overlapping_import_source_before_creating_task(
+    test_db, monkeypatch
+):
+    library = _enqueue_library("overlap")
+    monkeypatch.setattr(
+        MEDIA_PROVIDER_REGISTRY, "storage_for", lambda _handle: _OverlapStorage()
+    )
+
+    with pytest.raises(ApiError) as caught:
+        ImportTaskService.enqueue(
+            ImportRequest(
+                media_kind="video",
+                library_id=library.id,
+                source_ref={"kind": "manual_source", "relative_path": "media"},
+            )
+        )
+
+    assert caught.value.status_code == 422
+    assert caught.value.code == "provider_invalid_config"
+    assert BackgroundTaskRun.select().count() == 0
+
+
+def test_enqueue_validation_failure_does_not_touch_download_task(
+    test_db, monkeypatch
+):
+    library = _enqueue_library("overlap-download")
+    client = DownloadClient.create(
+        name="client", library=library, provider_config={}
+    )
+    task = DownloadTask.create(
+        client=client,
+        name="TEST-001",
+        movie="TEST-001",
+        remote_id="overlap-download",
+        state="completed",
+        completed_source_ref={"kind": "manual_source", "relative_path": "media"},
+        import_status=IMPORT_STATUS_PENDING,
+    )
+    monkeypatch.setattr(
+        MEDIA_PROVIDER_REGISTRY, "storage_for", lambda _handle: _OverlapStorage()
+    )
+
+    with pytest.raises(ApiError) as caught:
+        ImportTaskService.enqueue(
+            ImportRequest(
+                media_kind="jav",
+                library_id=library.id,
+                source_ref=task.completed_source_ref,
+            ),
+            download_task_id=task.id,
+            allowed_download_statuses={IMPORT_STATUS_PENDING},
+        )
+
+    assert caught.value.code == "provider_invalid_config"
+    assert DownloadTask.get_by_id(task.id).import_status == IMPORT_STATUS_PENDING
+    assert BackgroundTaskRun.select().count() == 0
+
+
+def test_enqueue_skips_validation_for_provider_without_capability(
+    test_db, monkeypatch
+):
+    library = _enqueue_library("no-validation")
+    monkeypatch.setattr(
+        MEDIA_PROVIDER_REGISTRY, "storage_for", lambda _handle: SimpleNamespace()
+    )
+
+    response = ImportTaskService.enqueue(
+        ImportRequest(
+            media_kind="video",
+            library_id=library.id,
+            source_ref={"kind": "manual_source", "relative_path": "video.mp4"},
+        )
+    )
+
+    assert response.state == "pending"
+    assert BackgroundTaskRun.select().count() == 1
+
+
+def test_enqueue_keeps_legacy_behavior_when_provider_not_installed(
+    test_db, monkeypatch
+):
+    library = _enqueue_library("missing-provider")
+
+    def unavailable(_handle):
+        raise ProviderUnavailableError("test")
+
+    monkeypatch.setattr(MEDIA_PROVIDER_REGISTRY, "storage_for", unavailable)
+
+    response = ImportTaskService.enqueue(
+        ImportRequest(
+            media_kind="video",
+            library_id=library.id,
+            source_ref={"kind": "manual_source", "relative_path": "video.mp4"},
+        )
+    )
+
+    assert response.state == "pending"
+    assert BackgroundTaskRun.select().count() == 1
+
+
+def test_enqueue_maps_provider_build_failure_to_api_error(test_db, monkeypatch):
+    library = _enqueue_library("bad-provider")
+
+    def invalid_config(_handle):
+        raise ProviderOperationError(
+            provider_key="test",
+            operation="build_storage",
+            code="invalid_config",
+            safe_message="配置无效",
+            retryable=False,
+        )
+
+    monkeypatch.setattr(MEDIA_PROVIDER_REGISTRY, "storage_for", invalid_config)
+
+    with pytest.raises(ApiError) as caught:
+        ImportTaskService.enqueue(
+            ImportRequest(
+                media_kind="video",
+                library_id=library.id,
+                source_ref={"kind": "manual_source", "relative_path": "video.mp4"},
+            )
+        )
+
+    assert caught.value.status_code == 422
+    assert caught.value.code == "provider_invalid_config"
+    assert BackgroundTaskRun.select().count() == 0

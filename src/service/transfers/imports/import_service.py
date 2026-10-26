@@ -53,6 +53,7 @@ from src.plugins.provider_protocol import (
     ProviderOperationError,
     ProviderUnavailableError,
     StagedMedia,
+    supports_import_source_validation,
 )
 from src.schema.catalog.subtitles import SubtitleImportStatus
 from src.schema.transfers.media_import import ImportResult
@@ -106,6 +107,61 @@ class MediaImportService:
             ) from exc
         except ProviderOperationError as exc:
             raise self._provider_error(exc) from exc
+
+    @classmethod
+    def validate_import_source(
+        cls,
+        library: MediaLibrary,
+        *,
+        source_ref: dict[str, Any],
+        source_disposition: str,
+    ) -> None:
+        try:
+            storage = MEDIA_PROVIDER_REGISTRY.storage_for(library_handle_for(library))
+        except ProviderUnavailableError:
+            # 插件未安装：保持原有“入队后异步失败”的行为。
+            logger.warning(
+                "Import source validation skipped provider_key={} reason=provider_not_installed",
+                library.provider_key,
+            )
+            return
+        except ProviderOperationError as exc:
+            raise cls._provider_error(exc) from exc
+        except Exception as exc:
+            logger.exception("Build storage for import source validation failed")
+            raise ApiError(
+                502, "provider_validation_failed", "媒体提供方校验导入源失败"
+            ) from exc
+        cls._validate_storage_source(
+            storage,
+            source_ref=source_ref,
+            source_disposition=source_disposition,
+        )
+
+    @classmethod
+    def _validate_storage_source(
+        cls,
+        storage: Any,
+        *,
+        source_ref: dict[str, Any],
+        source_disposition: str,
+    ) -> None:
+        if not supports_import_source_validation(storage):
+            return
+        try:
+            storage.validate_import_source(
+                source_ref=source_ref,
+                source_disposition=source_disposition,
+            )
+        except ProviderOperationError as exc:
+            raise cls._provider_error(exc) from exc
+        except ApiError:
+            raise
+        except Exception as exc:
+            logger.exception("Provider import source validation failed")
+            raise ApiError(
+                502, "provider_validation_failed", "媒体提供方校验导入源失败"
+            ) from exc
 
     def _supports_in_place_import(self, library: MediaLibrary, storage: Any) -> bool:
         if self._provider_override is not None:
@@ -232,6 +288,11 @@ class MediaImportService:
             library, storage
         ):
             raise ApiError(422, "in_place_import_unsupported", "该媒体库不支持原地导入")
+        self._validate_storage_source(
+            storage,
+            source_ref=source_ref,
+            source_disposition=source_disposition,
+        )
         try:
             if progress_callback is not None and MEDIA_PROVIDER_REGISTRY.supports_scan_progress(library.provider_key):
                 scanned_files = tuple(storage.scan_import_source(
@@ -689,6 +750,11 @@ class MediaImportService:
             library, storage
         ):
             raise ApiError(422, "in_place_import_unsupported", "该媒体库不支持原地导入")
+        self._validate_storage_source(
+            storage,
+            source_ref=source.source_ref,
+            source_disposition=source_disposition,
+        )
 
         from src.service.catalog.movie_metadata_search_service import (
             MovieMetadataSearchService,
