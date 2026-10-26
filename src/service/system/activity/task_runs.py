@@ -15,7 +15,9 @@ from src.service.system.activity.filters import (
     normalize_string_filter,
 )
 from src.service.system.activity.notifications import NotificationService
-from src.service.system.activity.task_catalog import TASK_NAME_REGISTRY
+from src.service.system.activity.task_text import (
+    resolve_task_name as resolve_task_name_text,
+)
 
 ALLOWED_TASK_TRIGGER_TYPES = {"scheduled", "manual", "startup", "internal", "plugin"}
 ALLOWED_TASK_STATES = {"pending", "running", "completed", "failed"}
@@ -82,7 +84,7 @@ class TaskRunService:
 
     @staticmethod
     def resolve_task_name(task_key: str, task_name: str | None = None) -> str:
-        return (task_name or "").strip() or TASK_NAME_REGISTRY.get(task_key, task_key)
+        return resolve_task_name_text(task_key, task_name)
 
     @classmethod
     def build_task_run_query(

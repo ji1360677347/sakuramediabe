@@ -61,6 +61,7 @@ DOWNLOAD_TASK_MANUAL_FIELDS_MIGRATION_NAME = (
     "20261024_01_add_download_task_manual_fields"
 )
 ALLOW_LOCAL_ACTOR_MIGRATION_NAME = "20261025_01_allow_local_actor_without_javdb_id"
+USER_LANGUAGE_MIGRATION_NAME = "20261027_01_add_user_language"
 
 
 @dataclass(frozen=True)

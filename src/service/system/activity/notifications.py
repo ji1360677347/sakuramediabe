@@ -4,6 +4,7 @@ from dataclasses import dataclass
 
 from src.common.runtime_time import utc_now_for_db
 from src.common.service_helpers import paginate, validate_page
+from src.i18n import current_language, translate
 from src.model import BackgroundTaskRun, SystemNotification
 from src.model.base import get_database
 from src.schema.common.pagination import PageResponse
@@ -14,6 +15,8 @@ from src.schema.system.activity import (
 from src.service.system.activity.filters import (
     normalize_allowed_filter,
 )
+from src.service.system.activity.task_text import resolve_task_name
+from src.service.system.language_service import language_scope_if_needed
 
 ALLOWED_NOTIFICATION_CATEGORIES = {"reminder", "info", "warning", "error"}
 
@@ -141,15 +144,35 @@ class NotificationService:
 
     @classmethod
     def notify_task_result(cls, task_run: BackgroundTaskRun, *, failed: bool) -> None:
+        # 队列回收/租约过期等路径可能没有任务执行上下文，这里补一个后台语言作用域。
+        with language_scope_if_needed():
+            cls._notify_task_result(task_run, failed=failed)
+
+    @classmethod
+    def _notify_task_result(
+        cls, task_run: BackgroundTaskRun, *, failed: bool
+    ) -> None:
         # 一条 task_run 最多只有一条终态通知。TaskRunService 的 active -> terminal
         # 行锁负责裁决赢家，这里的持久幂等键再防调用重放或事务重试重复插入通知。
         dedupe_key = f"task_run_result:{task_run.id}"
+        task_name = resolve_task_name(task_run.task_key, task_run.task_name)
         if failed:
+            content = (
+                translate("notifications.task_failed.content")
+                if current_language() == "en"
+                else (
+                    task_run.error_message
+                    or translate("notifications.task_failed.content")
+                )
+            )
             cls.create_once(
                 NotificationDraft(
                     category="error",
-                    title=f"{task_run.task_name}执行失败",
-                    content=task_run.error_message or "后台任务执行失败",
+                    title=translate(
+                        "notifications.task_failed.title",
+                        task_name=task_name,
+                    ),
+                    content=content,
                     event_type="task_run_result",
                     dedupe_key=dedupe_key,
                     resource_type="task_run",
@@ -161,11 +184,22 @@ class NotificationService:
         # 常态成功和 skipped 不发通知，仅带 failed 统计的完成态提示 warning。
         if not _detect_failed_summary(task_run.result_summary or {}):
             return
+        content = (
+            translate("notifications.task_completed.content")
+            if current_language() == "en"
+            else (
+                task_run.result_text
+                or translate("notifications.task_completed.content")
+            )
+        )
         cls.create_once(
             NotificationDraft(
                 category="warning",
-                title=f"{task_run.task_name}已完成",
-                content=task_run.result_text or "后台任务已完成",
+                title=translate(
+                    "notifications.task_completed.title",
+                    task_name=task_name,
+                ),
+                content=content,
                 event_type="task_run_result",
                 dedupe_key=dedupe_key,
                 resource_type="task_run",

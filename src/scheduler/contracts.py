@@ -20,6 +20,8 @@ class JobDefinition(BaseModel):
     log_name: str = Field(min_length=1)
     cli_name: str = Field(min_length=1)
     cli_help: str = Field(min_length=1)
+    # 可选多语言任务说明；缺失时回退 cli_help。由宿主在响应/建任务时解析。
+    cli_help_i18n: dict[str, str] = Field(default_factory=dict)
     # 内建任务继续通过 Scheduler 的静态字段取 cron；插件任务使用 default_cron。
     cron_setting: str | None = None
     default_cron: str | None = None

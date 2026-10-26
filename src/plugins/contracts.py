@@ -63,6 +63,8 @@ class PluginRegistration(BaseModel):
 
     plugin_id: str = Field(min_length=1, max_length=64)
     display_name: str = Field(min_length=1)
+    # 可选多语言展示名；manifest 与注册声明都支持，缺失时回退 display_name。
+    display_name_i18n: dict[str, str] = Field(default_factory=dict)
     version: str = Field(min_length=1)
     host_api_version: int = HOST_API_VERSION
     # 任务不要求至少一个：插件可以是纯能力型（未来扩展），零任务同样合法。

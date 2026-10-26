@@ -1,0 +1,10 @@
+{
+  "tasks.actor_subscription_sync.name": "订阅演员影片同步",
+  "tasks.actor_subscription_sync.progress.start": "开始同步已订阅演员影片",
+  "tasks.movie_javdb_backfill.name": "JavDB 影片补录",
+  "tasks.download_task_sync.name": "下载任务状态同步",
+  "notifications.task_failed.title": "{task_name}执行失败",
+  "notifications.task_failed.content": "后台任务执行失败",
+  "notifications.task_completed.title": "{task_name}已完成",
+  "notifications.task_completed.content": "后台任务已完成"
+}

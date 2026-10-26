@@ -17,6 +17,7 @@ from pydantic import ValidationError
 from src.config.config import Settings, settings, update_settings
 from src.plugins.contracts import validate_host_api_version
 from src.plugins.dependencies import dependency_failure_message
+from src.plugins.i18n import localize_json_schema, resolve_text
 from src.plugins.installer import PluginInstaller, PluginInstallError
 from src.plugins.loader import (
     PLUGIN_LOAD_ERRORS,
@@ -126,7 +127,11 @@ class PluginManager:
                 {
                     "plugin_id": plugin_id,
                     "display_name": (
-                        manifest.display_name if manifest is not None else plugin_id
+                        resolve_text(
+                            manifest.display_name, manifest.display_name_i18n
+                        )
+                        if manifest is not None
+                        else plugin_id
                     ),
                     "version": manifest.version if manifest is not None else "unknown",
                     "host_api_version": (
@@ -159,16 +164,25 @@ class PluginManager:
             or PLUGIN_LOAD_ERRORS.get(plugin_id, {}).get("message")
             or dependency_error
         )
+        manifest_payload = manifest.model_dump() if manifest else {}
+        if manifest is not None:
+            manifest_payload["display_name"] = resolve_text(
+                manifest.display_name, manifest.display_name_i18n
+            )
         return {
             "plugin_id": plugin_id,
-            "display_name": manifest.display_name if manifest else plugin_id,
+            "display_name": (
+                resolve_text(manifest.display_name, manifest.display_name_i18n)
+                if manifest
+                else plugin_id
+            ),
             "version": manifest.version if manifest else "unknown",
             "host_api_version": manifest.host_api_version if manifest else 0,
             "requires_python": manifest.requires_python if manifest else None,
             "author": manifest.author if manifest else None,
             "homepage": manifest.homepage if manifest else None,
             "release_api_url": manifest.release_api_url if manifest else None,
-            "manifest": manifest.model_dump() if manifest else {},
+            "manifest": manifest_payload,
             "enabled": plugin_id in set(self._enabled_ids()),
             "load_status": "error" if load_error is not None else "ok",
             "load_error": load_error,
@@ -384,7 +398,10 @@ class PluginManager:
         if model is None:
             return {}
         try:
-            return {"schema": model.model_json_schema(), "defaults": settings_defaults(model)}
+            return {
+                "schema": localize_json_schema(model.model_json_schema()),
+                "defaults": settings_defaults(model),
+            }
         except Exception as exc:
             raise PluginSettingsValidationError(f"无法读取插件配置定义: {exc}") from exc
 

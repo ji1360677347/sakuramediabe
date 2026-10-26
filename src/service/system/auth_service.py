@@ -12,6 +12,7 @@ from src.common.runtime_time import (
     utc_now_for_db,
 )
 from src.config.config import settings
+from src.i18n.locale import current_language_state
 from src.model import User, UserRefreshToken
 from src.model.enums import RefreshTokenStatus
 from src.schema.system.auth import AuthUserSummary, TokenResource
@@ -47,6 +48,11 @@ class AuthService:
             client_ip=client_ip,
             user_agent=user_agent,
         )
+        # 首次登录：把请求头里的显式选择落库；已有偏好不被请求头覆盖。
+        if user.language is None:
+            language_state = current_language_state()
+            if language_state is not None:
+                user.language = language_state.header_language
         user.last_login_at = AuthService._utcnow_naive()
         user.save()
         return AuthService._build_token_resource(

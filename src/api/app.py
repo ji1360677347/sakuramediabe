@@ -13,6 +13,7 @@ from src.api.exception.exception import (
     http_exception_handler,
     validation_exception_handler,
 )
+from src.api.middleware.language import LanguageContextMiddleware
 from src.api.middleware.slow_requests import SlowRequestLoggingMiddleware
 from src.api.routers.catalog.actors import router as actors_router
 from src.api.routers.catalog.movie_ratings import (
@@ -99,6 +100,8 @@ def create_app() -> FastAPI:
         allow_methods=["*"],
         allow_headers=["*"],
     )
+    # 语言上下文放在 CORS 之后，保证错误/插件等读时文案也带 Vary。
+    app.add_middleware(LanguageContextMiddleware)
 
     # 开发用慢请求日志，默认关闭；SAKURAMEDIA_SLOW_LOG=1 时启用。
     if slow_log_enabled():

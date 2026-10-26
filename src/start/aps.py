@@ -22,7 +22,13 @@ from src.scheduler.contracts import JobDefinition
 from src.scheduler.registry import JOB_REGISTRY, JOB_REGISTRY_BY_KEY
 from src.scheduler.worker import TaskWorker
 from src.service.system.activity import TaskRunConflictError
-from src.service.system.activity.task_catalog import TASK_NAME_REGISTRY
+from src.service.system.activity.task_text import (
+    resolve_job_task_name as resolve_job_task_name_text,
+)
+from src.service.system.language_service import (
+    language_scope_if_needed,
+    task_language_scope,
+)
 from src.service.system.optional_services import (
     job_disabled_reason,
     movie_similarity_enabled,
@@ -43,8 +49,8 @@ BOOTSTRAP_ERROR_RETRY_SECONDS = 5
 
 
 def resolve_job_task_name(job_def: JobDefinition) -> str:
-    """任务展示名：宿主注册表优先，插件任务回退到 cli_help，不落原始 task_key。"""
-    return TASK_NAME_REGISTRY.get(job_def.task_key) or job_def.cli_help
+    """任务展示名：宿主注册表/语言包优先，插件任务回退到 cli_help_i18n/cli_help。"""
+    return resolve_job_task_name_text(job_def)
 
 
 def get_job_cron_setting(job_def: JobDefinition) -> str | None:
@@ -105,12 +111,13 @@ def enqueue_scheduled_job(job_def: JobDefinition) -> BackgroundTaskRun | None:
     ``coalesce=True, max_instances=1`` 的"积压即丢弃"语义）。
     """
     ensure_database_ready()
-    task_run = TaskQueueService.enqueue(
-        task_key=job_def.task_key,
-        task_name=resolve_job_task_name(job_def),
-        trigger_type="scheduled",
-        conflict="skip",
-    )
+    with task_language_scope():
+        task_run = TaskQueueService.enqueue(
+            task_key=job_def.task_key,
+            task_name=resolve_job_task_name(job_def),
+            trigger_type="scheduled",
+            conflict="skip",
+        )
     if task_run is None:
         logger.info(
             "定时任务已在队列或执行中，本次触发按 coalesce 丢弃 task_key={}",
@@ -131,13 +138,14 @@ def submit_manual_job(
     require_job_enabled(job_def.task_key)
     ensure_database_ready()
     try:
-        return TaskQueueService.enqueue(
-            task_key=job_def.task_key,
-            task_name=resolve_job_task_name(job_def),
-            trigger_type="manual",
-            params=params,
-            conflict="raise",
-        )
+        with language_scope_if_needed():
+            return TaskQueueService.enqueue(
+                task_key=job_def.task_key,
+                task_name=resolve_job_task_name(job_def),
+                trigger_type="manual",
+                params=params,
+                conflict="raise",
+            )
     except TaskQueueConflictError as exc:
         blocking_task_run = (
             BackgroundTaskRun.get_or_none(BackgroundTaskRun.id == exc.blocking_task_run_id)
@@ -214,13 +222,14 @@ def _schedule_bootstrap_job(
 
     def _enqueue() -> None:
         try:
-            task_run = TaskQueueService.enqueue(
-                task_key=job_def.task_key,
-                task_name=resolve_job_task_name(job_def),
-                trigger_type="startup",
-                params=params,
-                conflict="raise",
-            )
+            with task_language_scope():
+                task_run = TaskQueueService.enqueue(
+                    task_key=job_def.task_key,
+                    task_name=resolve_job_task_name(job_def),
+                    trigger_type="startup",
+                    params=params,
+                    conflict="raise",
+                )
         except TaskQueueConflictError as exc:
             if exc.blocking_task_run_id is None:
                 # 冲突行恰在异常映射前释放 mutex，短延迟后重新走唯一约束裁决。

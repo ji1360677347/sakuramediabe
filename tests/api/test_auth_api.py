@@ -1,4 +1,4 @@
-from src.model import UserRefreshToken
+from src.model import User, UserRefreshToken
 
 
 def test_create_access_token_returns_token_resource(client, account_user):
@@ -10,10 +10,63 @@ def test_create_access_token_returns_token_resource(client, account_user):
     assert response.status_code == 201
     body = response.json()
     assert body["token_type"] == "Bearer"
-    assert body["user"] == {"username": account_user.username}
+    assert body["user"] == {
+        "username": account_user.username,
+        "language": None,
+    }
     assert "Z" not in body["expires_at"]
     assert "Z" not in body["refresh_expires_at"]
     assert UserRefreshToken.select().count() == 1
+
+
+def test_first_login_persists_accept_language(client, account_user):
+    response = client.post(
+        "/auth/tokens",
+        headers={"Accept-Language": "en-US"},
+        json={"username": account_user.username, "password": "password123"},
+    )
+
+    assert response.status_code == 201
+    assert response.json()["user"]["language"] == "en"
+    assert User.get_by_id(account_user.id).language == "en"
+
+
+def test_existing_language_is_not_overwritten_by_login_header(client, account_user):
+    account_user.language = "zh-CN"
+    account_user.save()
+
+    response = client.post(
+        "/auth/tokens",
+        headers={"Accept-Language": "en"},
+        json={"username": account_user.username, "password": "password123"},
+    )
+
+    assert response.status_code == 201
+    assert response.json()["user"]["language"] == "zh-CN"
+    assert User.get_by_id(account_user.id).language == "zh-CN"
+
+
+def test_invalid_credentials_message_is_localized_in_english(client, account_user):
+    response = client.post(
+        "/auth/tokens",
+        headers={"Accept-Language": "en"},
+        json={"username": account_user.username, "password": "wrong-password"},
+    )
+
+    assert response.status_code == 401
+    body = response.json()
+    assert body["error"]["code"] == "invalid_credentials"
+    assert body["error"]["message"] == "Username or password is incorrect"
+
+
+def test_invalid_credentials_message_is_unchanged_in_chinese(client, account_user):
+    response = client.post(
+        "/auth/tokens",
+        json={"username": account_user.username, "password": "wrong-password"},
+    )
+
+    assert response.status_code == 401
+    assert response.json()["error"]["message"] == "Username or password is incorrect"
 
 
 def test_create_access_token_rejects_invalid_credentials(client, account_user):
