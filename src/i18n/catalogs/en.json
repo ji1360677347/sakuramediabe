@@ -208,5 +208,6 @@
     "other": "{count} download tasks pending"
   },
   "tasks.library_import.progress.processed": "Processed download tasks {current}/{total}",
-  "tasks.library_import.progress.retrying": "Retrying failed video"
+  "tasks.library_import.progress.retrying": "Retrying failed video",
+  "errors.provider_validation_failed": "The media provider failed to validate the import source"
 }
