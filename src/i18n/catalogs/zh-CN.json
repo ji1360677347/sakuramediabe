@@ -28,5 +28,11 @@
   "tasks.media_storage_transfer.name": "媒体存储迁移",
   "tasks.batch_operation.name": "批量操作",
   "notifications.new_media.title": "有新的影片可以播放了",
-  "notifications.new_media.content": "新增了 {count} 个影片"
+  "notifications.new_media.content": "新增了 {count} 个影片",
+  "tasks.library_import.progress.pending": {
+    "one": "待处理下载任务 {count} 个",
+    "other": "待处理下载任务 {count} 个"
+  },
+  "tasks.library_import.progress.processed": "已处理下载任务 {current}/{total}",
+  "tasks.library_import.progress.retrying": "正在重试失败视频"
 }

@@ -1,4 +1,6 @@
+import ast
 import json
+from pathlib import Path
 from string import Formatter
 
 from src.i18n.catalog import CATALOG_DIR, _select_value, has_translation, translate
@@ -19,6 +21,37 @@ def _placeholders(value) -> set[str]:
             if field_name:
                 result.add(field_name)
     return result
+
+
+def _api_error_codes() -> set[str]:
+    codes: set[str] = set()
+    for path in Path("src").rglob("*.py"):
+        tree = ast.parse(path.read_text(encoding="utf-8"))
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.Call):
+                continue
+            func = node.func
+            name = (
+                func.id
+                if isinstance(func, ast.Name)
+                else func.attr
+                if isinstance(func, ast.Attribute)
+                else None
+            )
+            if name != "ApiError" or len(node.args) < 2:
+                continue
+            code = node.args[1]
+            if isinstance(code, ast.Constant) and isinstance(code.value, str):
+                codes.add(code.value)
+    return codes
+
+
+def test_every_api_error_code_has_english_translation():
+    en = _load_catalog("en.json")
+    missing = sorted(
+        code for code in _api_error_codes() if f"errors.{code}" not in en
+    )
+    assert not missing, missing
 
 
 def test_catalogs_keep_key_and_placeholder_parity():

@@ -16,6 +16,7 @@ from src.common.media_import_status import (
     IMPORT_STATUS_RUNNING,
     IMPORT_STATUS_SKIPPED,
 )
+from src.i18n import translate
 from src.model import BackgroundTaskRun, DownloadTask, MediaLibrary
 from src.model.base import get_database
 from src.schema.transfers.media_import import (
@@ -330,7 +331,11 @@ class ImportTaskService:
         new_playable_movies = []
         created_video_ids = []
         failed_files = []
-        reporter.emit(current=0, total=total, text=f"待处理下载任务 {total} 个")
+        reporter.emit(
+            current=0,
+            total=total,
+            text=translate("tasks.library_import.progress.pending", count=total),
+        )
         step = max(total // 20, 1)
         for item in batch_items:
             task_id = int(item["download_task_id"])
@@ -361,7 +366,11 @@ class ImportTaskService:
                 reporter.emit(
                     current=processed_count,
                     total=total,
-                    text=f"已处理下载任务 {processed_count}/{total}",
+                    text=translate(
+                        "tasks.library_import.progress.processed",
+                        current=processed_count,
+                        total=total,
+                    ),
                 )
                 if processed_count == 1 or processed_count % step == 0:
                     logger.info(
@@ -389,7 +398,11 @@ class ImportTaskService:
         original_task_run_id = int(params["original_task_run_id"])
         failure_item_id = str(params["failure_item_id"])
         candidate_id = str(params["candidate_id"])
-        reporter.emit(current=0, total=1, text="正在重试失败视频")
+        reporter.emit(
+            current=0,
+            total=1,
+            text=translate("tasks.library_import.progress.retrying"),
+        )
         try:
             from src.service.transfers.imports.import_service import MediaImportService
 
