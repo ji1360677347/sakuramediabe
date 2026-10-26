@@ -7,7 +7,7 @@ from loguru import logger
 from src.api.exception.errors import ApiError
 from src.common.service_helpers import require_by_id
 from src.model import DownloadClient, Media, MediaLibrary
-from src.plugins.i18n import localize_config_field
+from src.plugins.i18n import localize_config_field, localize_provider_bundle
 from src.plugins.provider_protocol import (
     MEDIA_PROVIDER_REGISTRY,
     ProviderOperationError,
@@ -244,7 +244,7 @@ class MediaLibraryService:
             entries.append(
                 {
                     "provider_key": bundle.provider_key,
-                    "display_name": bundle.display_name,
+                    "display_name": localize_provider_bundle(bundle),
                     "library_config_fields": [
                         localize_config_field(field)
                         for field in bundle.library_config_fields

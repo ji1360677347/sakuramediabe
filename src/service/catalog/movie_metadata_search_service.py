@@ -18,6 +18,7 @@ from src.common import (
     normalize_movie_number,
 )
 from src.common.media_paths import media_image_root_path
+from src.i18n.text import resolve_text
 from src.metadata._providers.models import JavdbMovieDetailResource
 from src.metadata.factory import build_javdb_provider
 from src.metadata.provider import MetadataNotFoundError
@@ -77,7 +78,12 @@ class MovieMetadataSearchService:
                     )
                 )
             else:
-                for plugin_id, plugin_name, _source in MetadataSourceService.enabled_plugin_sources():
+                for (
+                    plugin_id,
+                    plugin_name,
+                    plugin_name_i18n,
+                    _source,
+                ) in MetadataSourceService.enabled_plugin_sources():
                     try:
                         with MetadataSourceService.fetch_plugin(
                             plugin_id, normalized_number
@@ -98,7 +104,7 @@ class MovieMetadataSearchService:
                         source_errors.append(
                             ImportMetadataSourceErrorResource(
                                 source=plugin_id,
-                                source_name=plugin_name,
+                                source_name=resolve_text(plugin_name, plugin_name_i18n),
                                 reason=type(exc).__name__,
                                 detail=str(exc),
                             )

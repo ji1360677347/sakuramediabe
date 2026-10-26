@@ -1,5 +1,6 @@
 import json
 from contextlib import contextmanager
+from types import SimpleNamespace
 
 from src.config.config import settings
 from src.i18n.locale import (
@@ -15,6 +16,7 @@ from src.plugins.i18n import (
     PluginI18n,
     localize_config_field,
     localize_json_schema,
+    localize_provider_bundle,
     resolve_text,
 )
 from src.plugins.manager import PluginManager
@@ -157,6 +159,23 @@ def test_plugin_context_exposes_i18n(tmp_path):
     with _language("en"):
         assert context.i18n.t("hello", count=1) == "Hello 1"
         assert context.i18n.t("missing", default="fallback") == "fallback"
+
+
+def test_localize_provider_bundle_falls_back_for_old_plugins():
+    with _language("en"):
+        assert (
+            localize_provider_bundle(
+                SimpleNamespace(
+                    display_name="本地媒体库",
+                    display_name_i18n={"en": "Local library"},
+                )
+            )
+            == "Local library"
+        )
+        assert (
+            localize_provider_bundle(SimpleNamespace(display_name="本地媒体库"))
+            == "本地媒体库"
+        )
 
 
 def test_localize_config_field_resolves_and_removes_i18n_keys():

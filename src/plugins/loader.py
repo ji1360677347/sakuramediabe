@@ -296,6 +296,13 @@ def _load_plugin_dir(
     )
     return registration.model_copy(update={
         "jobs": jobs, "host_api_version": manifest.host_api_version,
+        # 插件可以只在 manifest 或 registration 里声明展示名翻译；manifest 是
+        # 安装期就能读到的兼容边界，registration 未提供时用它补全，两边都有
+        # 时以 registration 为准。
+        "display_name_i18n": {
+            **manifest.display_name_i18n,
+            **registration.display_name_i18n,
+        },
     })
 
 

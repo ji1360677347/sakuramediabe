@@ -4,6 +4,7 @@ from src.i18n.locale import LanguageState, reset_language_state, set_language_st
 from src.model import BackgroundTaskRun, SystemNotification
 from src.scheduler.contracts import JobDefinition
 from src.service.system.activity.notifications import NotificationService
+from src.service.system.activity.task_catalog import TASK_NAME_REGISTRY
 from src.service.system.activity.task_text import (
     resolve_job_cli_help,
     resolve_job_task_name,
@@ -51,6 +52,12 @@ def test_resolve_task_name_translates_host_task():
             resolve_task_name("movie_javdb_backfill", "JavDB 影片补录")
             == "JavDB movie backfill"
         )
+
+
+def test_every_registered_task_has_english_name():
+    with _language("en"):
+        for task_key, zh_name in TASK_NAME_REGISTRY.items():
+            assert resolve_task_name(task_key) != zh_name, task_key
 
 
 def test_resolve_task_name_preserves_dynamic_name():

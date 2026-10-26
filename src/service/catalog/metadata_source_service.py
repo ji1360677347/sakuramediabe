@@ -11,6 +11,7 @@ from PIL import Image as PillowImage
 from src.common import normalize_movie_number
 from src.common.service_helpers import find_movie_by_number
 from src.config.config import settings
+from src.i18n.text import resolve_text
 from src.metadata.provider import MetadataNotFoundError
 from src.model import Actor
 from src.plugins.extensions.metadata import (
@@ -49,6 +50,7 @@ class MetadataSourceService:
             (
                 registration.plugin_id,
                 registration.display_name,
+                registration.display_name_i18n,
                 validate_metadata_extension(
                     plugin_id=registration.plugin_id, extension=extension
                 ),
@@ -61,7 +63,10 @@ class MetadataSourceService:
     @classmethod
     def enabled_plugin_sources(cls):
         """按宿主配置顺序返回当前启用且已注册的元数据插件。"""
-        sources = {plugin_id: (name, source) for plugin_id, name, source in cls.sources}
+        sources = {
+            plugin_id: (name, name_i18n, source)
+            for plugin_id, name, name_i18n, source in cls.sources
+        }
         return tuple(
             (plugin_id, *sources[plugin_id])
             for plugin_id in settings.plugins.enabled
@@ -70,7 +75,10 @@ class MetadataSourceService:
 
     @classmethod
     def is_plugin_enabled(cls, plugin_id: str) -> bool:
-        return any(current_id == plugin_id for current_id, _, _ in cls.enabled_plugin_sources())
+        return any(
+            current_id == plugin_id
+            for current_id, _, _, _ in cls.enabled_plugin_sources()
+        )
 
     @staticmethod
     def _delivery_paths(detail: PluginMovieMetadata, root: Path) -> Iterator[Path]:
@@ -103,15 +111,15 @@ class MetadataSourceService:
     def _load_plugin(cls, plugin_id: str, movie_number: str):
         source_entry = next(
             (
-                (name, source)
-                for current_id, name, source in cls.enabled_plugin_sources()
+                (name, name_i18n, source)
+                for current_id, name, name_i18n, source in cls.enabled_plugin_sources()
                 if current_id == plugin_id
             ),
             None,
         )
         if source_entry is None:
             raise MetadataSourceError(f"元数据插件未启用或未注册: {plugin_id}")
-        name, source = source_entry
+        name, name_i18n, source = source_entry
         paths: set[Path] = set()
         try:
             result = source.fetch_movie(movie_number)
@@ -146,7 +154,7 @@ class MetadataSourceService:
             ) from exc
         return detail, {
             "plugin_id": plugin_id,
-            "display_name": name,
+            "display_name": resolve_text(name, name_i18n),
             "source_id": detail.source_id,
             "source_url": detail.source_url,
         }, paths
@@ -174,7 +182,7 @@ class MetadataSourceService:
 
         failures = []
         # enabled 是宿主有序配置，同时确保已停用的插件不再被调用。
-        for plugin_id, _name, _source in cls.enabled_plugin_sources():
+        for plugin_id, _name, _name_i18n, _source in cls.enabled_plugin_sources():
             try:
                 detail, source, paths = cls._load_plugin(plugin_id, movie_number)
             except MetadataNotFoundError:

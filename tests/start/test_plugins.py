@@ -81,6 +81,30 @@ def _clear_load_errors():
     PLUGIN_LOAD_ERRORS.clear()
 
 
+def test_loader_merges_manifest_display_name_i18n(tmp_path):
+    plugin_id = "i18n_plugin"
+    init_source = (
+        "from src.plugins import HOST_API_VERSION, PluginContext, PluginRegistration\n"
+        "def register(context):\n"
+        "    return PluginRegistration(plugin_id='i18n_plugin', display_name='x', "
+        "display_name_i18n={'zh-CN': 'I18n 插件'}, version='1.0.0', "
+        "host_api_version=HOST_API_VERSION, jobs=())\n"
+    )
+    pkg = _write_plugin_dir(tmp_path, plugin_id, init_source=init_source)
+    manifest = json.loads((pkg / "manifest.json").read_text(encoding="utf-8"))
+    manifest["display_name_i18n"] = {"en": "I18n plugin"}
+    (pkg / "manifest.json").write_text(
+        json.dumps(manifest, ensure_ascii=False), encoding="utf-8"
+    )
+
+    loaded = load_enabled_plugins(Plugins(enabled=[plugin_id]), root_dir=tmp_path)
+
+    assert loaded[0].display_name_i18n == {
+        "en": "I18n plugin",
+        "zh-CN": "I18n 插件",
+    }
+
+
 def test_loader_passes_plugin_root_to_context_i18n(tmp_path):
     plugin_id = "i18n_plugin"
     init_source = (

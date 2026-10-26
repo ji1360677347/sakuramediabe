@@ -53,6 +53,29 @@ def test_media_provider_catalog_is_sorted_and_exposes_field_metadata(
     assert response.json()[1]["download_config_fields"] == []
 
 
+def test_media_provider_catalog_localizes_display_name(
+    client,
+    account_user,
+    monkeypatch,
+):
+    bundle = SimpleNamespace(
+        provider_key="i18n",
+        display_name="本地媒体库",
+        display_name_i18n={"en": "Local library"},
+        library_config_fields=(),
+        playback_deliveries=("proxy",),
+        downloads=None,
+    )
+    monkeypatch.setattr(MEDIA_PROVIDER_REGISTRY, "list_bundles", lambda: (bundle,))
+
+    headers = _auth_headers(client, account_user)
+    headers["Accept-Language"] = "en"
+    response = client.get("/media-libraries/providers", headers=headers)
+
+    assert response.status_code == 200
+    assert response.json()[0]["display_name"] == "Local library"
+
+
 def test_media_provider_catalog_localizes_config_fields(
     client,
     account_user,

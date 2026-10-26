@@ -511,6 +511,8 @@ class DownloadComponent(Protocol):
 class MediaProviderBundle(Protocol):
     provider_key: str
     display_name: str
+    # 可选多语言展示名；缺失时回退 display_name。宿主在返回 provider 目录时解析。
+    display_name_i18n: dict[str, str] | None
     library_config_fields: tuple[ConfigField, ...]
     # 首项为插件默认传输方式；其余项为可显式请求的方式。
     playback_deliveries: tuple[PlaybackDelivery, ...]

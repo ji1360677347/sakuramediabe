@@ -174,6 +174,27 @@ def test_media_provider_validator_requires_supported_playback_deliveries(
 
 
 @pytest.mark.parametrize(
+    ("value", "error", "message"),
+    (
+        ("Local", TypeError, "display_name_i18n"),
+        ({"en": 1}, TypeError, "display_name_i18n"),
+        ({"": "Local"}, ValueError, "display_name_i18n"),
+    ),
+)
+def test_media_provider_validator_rejects_invalid_display_name_i18n(
+    value, error, message
+):
+    bundle = _Bundle()
+    bundle.display_name_i18n = value
+
+    with pytest.raises(error, match=message):
+        validate_media_provider_extension(
+            plugin_id="demo_plugin",
+            extension=PluginExtension(key=MEDIA_PROVIDER_EXTENSION_KEY, data=bundle),
+        )
+
+
+@pytest.mark.parametrize(
     ("field_name", "value", "error", "message"),
     (
         ("label_i18n", "Token", TypeError, "label_i18n"),

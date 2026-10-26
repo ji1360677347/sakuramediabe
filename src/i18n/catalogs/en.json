@@ -11,5 +11,30 @@
   "errors.plugin_not_found": "Plugin not found",
   "errors.invalid_language": "Unsupported language: {language}",
   "errors.invalid_credentials": "Username or password is incorrect",
-  "errors.invalid_refresh_token": "Refresh token is invalid"
+  "errors.invalid_refresh_token": "Refresh token is invalid",
+  "tasks.subscribed_movie_auto_download.name": "Auto-download subscribed missing movies",
+  "tasks.movie_heat_update.name": "Movie heat update",
+  "tasks.movie_interaction_sync.name": "Movie interaction sync",
+  "tasks.actor_gender_backfill.name": "Actor gender backfill",
+  "tasks.movie_similarity_recompute.name": "Movie similarity recompute",
+  "tasks.download_task_auto_import.name": "Auto-import completed downloads",
+  "tasks.media_file_hash_backfill.name": "Media file hash backfill",
+  "tasks.media_duration_backfill.name": "Media duration backfill",
+  "tasks.media_video_info_backfill.name": "Media info backfill",
+  "tasks.media_resolution_backfill.name": "Media resolution backfill",
+  "tasks.media_file_scan.name": "Media file scan",
+  "tasks.media_thumbnail_generation.name": "Media thumbnail generation",
+  "tasks.image_search_index.name": "Image search index build",
+  "tasks.moment_recommendation_generate.name": "Recommended moment generation",
+  "tasks.daily_recommendation_generate.name": "Daily recommendation snapshot generation",
+  "tasks.gfriends_filetree_refresh.name": "GFriends cache refresh",
+  "tasks.activity_record_cleanup.name": "Task record cleanup",
+  "tasks.library_import.name": "Media library import",
+  "tasks.media_storage_transfer.name": "Media storage transfer",
+  "tasks.batch_operation.name": "Batch operation",
+  "notifications.new_media.title": "New movies are ready to play",
+  "notifications.new_media.content": {
+    "one": "{count} new movie added",
+    "other": "{count} new movies added"
+  }
 }

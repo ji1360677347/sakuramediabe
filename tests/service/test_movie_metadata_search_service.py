@@ -6,6 +6,7 @@ from PIL import Image as PillowImage
 
 from src.api.exception.errors import ApiError
 from src.config.config import settings
+from src.i18n.locale import LanguageState, reset_language_state, set_language_state
 from src.metadata._providers.models import JavdbMovieDetail
 from src.metadata.provider import MetadataNotFoundError
 from src.model import Image, Movie
@@ -70,6 +71,7 @@ def _prepare_search_environment(monkeypatch, tmp_path, javdb_search, calls):
             (
                 "metadata_one",
                 "Metadata One",
+                {"en": "Metadata One EN"},
                 PluginMetadataSource(
                     fetch_movie=successful_plugin
                 ),
@@ -77,6 +79,7 @@ def _prepare_search_environment(monkeypatch, tmp_path, javdb_search, calls):
             (
                 "metadata_two",
                 "Metadata Two",
+                {"en": "Metadata Two EN"},
                 PluginMetadataSource(
                     fetch_movie=failed_plugin
                 ),
@@ -163,6 +166,26 @@ def test_manual_search_aggregates_plugins_when_javdb_not_found(
 
     cached_files = list((image_root / "metadata-search").rglob("*"))
     assert any(path.is_file() for path in cached_files)
+
+
+def test_manual_search_localizes_plugin_source_names(
+    test_db, tmp_path, monkeypatch
+):
+    calls = []
+
+    def javdb_search(number):
+        calls.append(("javdb", number))
+        raise MetadataNotFoundError("movie", number)
+
+    _prepare_search_environment(monkeypatch, tmp_path, javdb_search, calls)
+    token = set_language_state(LanguageState(header_language="en"))
+    try:
+        response = MovieMetadataSearchService.search_by_number("abc-001")
+    finally:
+        reset_language_state(token)
+
+    assert response.candidates[0].source_name == "Metadata One EN"
+    assert response.source_errors[0].source_name == "Metadata Two EN"
 
 
 def test_search_candidate_reference_rejects_disabled_plugin(monkeypatch):

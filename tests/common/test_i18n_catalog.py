@@ -2,6 +2,7 @@ import json
 from string import Formatter
 
 from src.i18n.catalog import CATALOG_DIR, _select_value, has_translation, translate
+from src.service.system.activity.task_catalog import TASK_NAME_REGISTRY
 
 
 def _load_catalog(filename: str) -> dict:
@@ -29,6 +30,47 @@ def test_catalogs_keep_key_and_placeholder_parity():
     assert all(key.startswith("errors.") for key in set(en) - set(zh))
     for key in set(zh):
         assert _placeholders(zh[key]) == _placeholders(en[key]), key
+
+
+def test_every_registered_task_name_has_both_catalogs():
+    zh = _load_catalog("zh-CN.json")
+    en = _load_catalog("en.json")
+
+    for task_key in TASK_NAME_REGISTRY:
+        key = f"tasks.{task_key}.name"
+        assert key in zh, task_key
+        assert key in en, task_key
+
+
+def test_host_notification_keys_exist_in_both_catalogs():
+    zh = _load_catalog("zh-CN.json")
+    en = _load_catalog("en.json")
+    required = {
+        "notifications.task_failed.title",
+        "notifications.task_failed.content",
+        "notifications.task_completed.title",
+        "notifications.task_completed.content",
+        "notifications.new_media.title",
+        "notifications.new_media.content",
+    }
+
+    assert required <= set(zh)
+    assert required <= set(en)
+
+
+def test_new_media_notification_plural():
+    assert (
+        translate("notifications.new_media.content", locale="en", count=1)
+        == "1 new movie added"
+    )
+    assert (
+        translate("notifications.new_media.content", locale="en", count=3)
+        == "3 new movies added"
+    )
+    assert (
+        translate("notifications.new_media.content", locale="zh-CN", count=3)
+        == "新增了 3 个影片"
+    )
 
 
 def test_zh_cn_sample_text_matches_existing_code_strings():

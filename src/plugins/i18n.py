@@ -29,6 +29,7 @@ __all__ = [
     "PluginI18n",
     "localize_config_field",
     "localize_json_schema",
+    "localize_provider_bundle",
     "resolve_text",
 ]
 
@@ -83,6 +84,14 @@ class PluginI18n:
             )
             for locale in SUPPORTED_LANGUAGES
         }
+
+
+def localize_provider_bundle(bundle: Any) -> str:
+    """解析媒体 Provider 展示名；旧插件没有 display_name_i18n 时回退原文。"""
+    return resolve_text(
+        getattr(bundle, "display_name", ""),
+        getattr(bundle, "display_name_i18n", None),
+    )
 
 
 def localize_config_field(field: Any) -> dict[str, Any]:
