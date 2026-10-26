@@ -28,6 +28,8 @@ class PluginRankingBoard(BaseModel):
 
     key: str = Field(min_length=1, max_length=64, pattern=r"^[a-z][a-z0-9_]*$")
     name: str = Field(min_length=1)
+    # 可选多语言榜单名；缺失时回退 name。宿主在读取时解析。
+    name_i18n: dict[str, str] = Field(default_factory=dict)
     # 静态周期；空元组表示单期榜（API 不接受 period）。与 supported_periods_provider 二选一。
     supported_periods: tuple[str, ...] = Field(default_factory=tuple)
     default_period: str | None = None
@@ -71,6 +73,8 @@ class PluginRankingSource(BaseModel):
 
     source_key: str = Field(min_length=1, max_length=64, pattern=r"^[a-z][a-z0-9_]*$")
     name: str = Field(min_length=1)
+    # 可选多语言来源名；缺失时回退 name。宿主在读取时解析。
+    name_i18n: dict[str, str] = Field(default_factory=dict)
     boards: tuple[PluginRankingBoard, ...] = Field(min_length=1)
 
 

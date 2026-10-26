@@ -28,11 +28,13 @@ def _to_definition(
     return RankingSourceDefinition(
         key=source.source_key,
         name=source.name,
+        name_i18n=source.name_i18n,
         plugin_id=plugin_id,
         boards=tuple(
             RankingBoardDefinition(
                 key=board.key,
                 name=board.name,
+                name_i18n=board.name_i18n,
                 supported_periods=board.supported_periods,
                 default_period=board.default_period,
                 should_fetch=board.should_fetch,

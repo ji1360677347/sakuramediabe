@@ -29,8 +29,8 @@ from src.plugins.provider_protocol import (
 )
 
 
-def test_plugin_protocol_uses_host_api_v11():
-    assert HOST_API_VERSION == 11
+def test_plugin_protocol_uses_host_api_v12():
+    assert HOST_API_VERSION == 12
 
 
 def test_provider_operation_error_rejects_unknown_code():
@@ -171,6 +171,59 @@ def test_media_provider_validator_requires_supported_playback_deliveries(
             plugin_id="demo_plugin",
             extension=PluginExtension(key=MEDIA_PROVIDER_EXTENSION_KEY, data=bundle),
         )
+
+
+@pytest.mark.parametrize(
+    ("field_name", "value", "error", "message"),
+    (
+        ("label_i18n", "Token", TypeError, "label_i18n"),
+        ("description_i18n", ["Description"], TypeError, "description_i18n"),
+        ("hint_i18n", {"en": 1}, TypeError, "hint_i18n"),
+        ("label_i18n", {"": "Token"}, ValueError, "label_i18n"),
+    ),
+)
+def test_media_provider_validator_rejects_invalid_config_field_i18n(
+    field_name, value, error, message
+):
+    bundle = _Bundle()
+    bundle.library_config_fields = (
+        ConfigField(
+            key="cookie",
+            label="Cookie",
+            input="secret",
+            required=True,
+            **{field_name: value},
+        ),
+    )
+
+    with pytest.raises(error, match=message):
+        validate_media_provider_extension(
+            plugin_id="demo_plugin",
+            extension=PluginExtension(key=MEDIA_PROVIDER_EXTENSION_KEY, data=bundle),
+        )
+
+
+def test_media_provider_validator_accepts_config_field_i18n():
+    bundle = _Bundle()
+    bundle.library_config_fields = (
+        ConfigField(
+            key="cookie",
+            label="Cookie",
+            input="secret",
+            required=True,
+            label_i18n={"en": "Cookie"},
+            description_i18n={"en": "Session cookie"},
+            hint_i18n={"en": "Paste it"},
+        ),
+    )
+
+    assert (
+        validate_media_provider_extension(
+            plugin_id="demo_plugin",
+            extension=PluginExtension(key=MEDIA_PROVIDER_EXTENSION_KEY, data=bundle),
+        )
+        is bundle
+    )
 
 
 def test_media_provider_registry_builds_and_unloads_storage():

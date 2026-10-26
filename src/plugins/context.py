@@ -1383,11 +1383,23 @@ class PluginContext:
     plugin_id: str
     settings: Mapping[str, Any]
     _data_dir: Path
+    _plugin_root: Path | None
 
-    def __init__(self, plugin_id: str, settings: Mapping[str, Any], data_dir: Path):
+    def __init__(
+        self,
+        plugin_id: str,
+        settings: Mapping[str, Any],
+        data_dir: Path,
+        plugin_root: Path | None = None,
+    ):
         object.__setattr__(self, "plugin_id", plugin_id)
         object.__setattr__(self, "settings", settings)
         object.__setattr__(self, "_data_dir", Path(data_dir))
+        object.__setattr__(
+            self,
+            "_plugin_root",
+            Path(plugin_root) if plugin_root is not None else None,
+        )
 
     def ensure_data_dir(self) -> Path:
         """确保插件数据目录存在并返回（``<root>/<plugin_id>/data``）。"""
@@ -1397,6 +1409,13 @@ class PluginContext:
     @property
     def data_dir(self) -> Path:
         return self.ensure_data_dir()
+
+    @property
+    def i18n(self):
+        """插件运行时文本翻译器；语言跟随当前请求/任务上下文。"""
+        from src.plugins.i18n import PluginI18n
+
+        return PluginI18n(self.plugin_id, self._plugin_root)
 
     @property
     def actors(self) -> ActorApi:

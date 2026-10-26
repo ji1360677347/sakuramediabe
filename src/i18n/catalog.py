@@ -8,6 +8,7 @@
 from __future__ import annotations
 
 import json
+from collections.abc import Mapping
 from functools import cache
 from pathlib import Path
 from typing import Any
@@ -53,7 +54,8 @@ def has_translation(key: str, locale: str | None = None) -> bool:
     return key in _load_catalog(resolved)
 
 
-def translate(
+def translate_from_catalogs(
+    catalogs: Mapping[str, Mapping[str, Any]],
     key: str,
     *,
     locale: str | None = None,
@@ -61,18 +63,15 @@ def translate(
     fallback_to_default: bool = True,
     **params: Any,
 ) -> str:
-    """按当前/指定语言渲染 key。
+    """从一组已加载的 catalog 渲染 key。
 
-    ``locale`` 是目标语言参数，刻意不叫 ``language``，避免和消息里的
-    ``{language}`` 占位符冲突。
-    - 缺失译文时默认回退到 zh-CN；错误文案会传 ``fallback_to_default=False``，
-      由调用方决定英文通用兜底，避免把中文透给英文界面。
-    - 插值失败不抛异常，返回 default 或原始模板，保证错误 handler 不会二次 500。
+    供宿主全局 catalog 与插件自带 catalog 共用；catalog 的 key 是平铺点分
+    字符串，值可以是普通模板或 ``{"one": ..., "other": ...}``。
     """
     resolved = normalize_language(locale) or current_language()
-    value = _load_catalog(resolved).get(key)
+    value = catalogs.get(resolved, {}).get(key)
     if value is None and fallback_to_default and resolved != DEFAULT_LANGUAGE:
-        value = _load_catalog(DEFAULT_LANGUAGE).get(key)
+        value = catalogs.get(DEFAULT_LANGUAGE, {}).get(key)
     selected = _select_value(value, params)
     if selected is None:
         return default if default is not None else key
@@ -83,3 +82,33 @@ def translate(
             "i18n interpolation failed key={} language={}", key, resolved
         )
         return default if default is not None else selected
+
+
+def translate(
+    key: str,
+    *,
+    locale: str | None = None,
+    default: str | None = None,
+    fallback_to_default: bool = True,
+    **params: Any,
+) -> str:
+    """按当前/指定语言渲染宿主 catalog 的 key。
+
+    ``locale`` 是目标语言参数，刻意不叫 ``language``，避免和消息里的
+    ``{language}`` 占位符冲突。
+    - 缺失译文时默认回退到 zh-CN；错误文案会传 ``fallback_to_default=False``，
+      由调用方决定英文通用兜底，避免把中文透给英文界面。
+    - 插值失败不抛异常，返回 default 或原始模板，保证错误 handler 不会二次 500。
+    """
+    resolved = normalize_language(locale) or current_language()
+    catalogs: dict[str, Mapping[str, Any]] = {resolved: _load_catalog(resolved)}
+    if fallback_to_default and resolved != DEFAULT_LANGUAGE:
+        catalogs[DEFAULT_LANGUAGE] = _load_catalog(DEFAULT_LANGUAGE)
+    return translate_from_catalogs(
+        catalogs,
+        key,
+        locale=resolved,
+        default=default,
+        fallback_to_default=fallback_to_default,
+        **params,
+    )

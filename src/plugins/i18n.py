@@ -1,26 +1,110 @@
 """插件可选多语言文本的宿主侧解析。
 
-插件可以在 manifest / JobDefinition / settings JSON Schema 中提供 ``*_i18n``
-字典；宿主按当前语言替换展示字段，缺失时保留插件原文。这里不缓存本地化后的
-schema，避免污染 Pydantic 可能复用的原始 ``model_json_schema()`` 结果。
+插件可以在 manifest / JobDefinition / settings JSON Schema / ranking /
+provider config 中提供 ``*_i18n`` 字典；宿主按当前语言替换展示字段，缺失时
+保留插件原文。运行时文本走插件自带的 ``i18n/{locale}.json`` 和
+``context.i18n.t()``。
 """
 
 from __future__ import annotations
 
+import json
+from dataclasses import asdict
+from functools import cache
+from pathlib import Path
 from typing import Any
 
-from src.i18n.locale import DEFAULT_LANGUAGE, current_language, normalize_language
+from loguru import logger
+
+from src.i18n.catalog import translate_from_catalogs
+from src.i18n.locale import (
+    DEFAULT_LANGUAGE,
+    SUPPORTED_LANGUAGES,
+    current_language,
+    normalize_language,
+)
+from src.i18n.text import resolve_text
+
+__all__ = [
+    "PluginI18n",
+    "localize_config_field",
+    "localize_json_schema",
+    "resolve_text",
+]
 
 
-def resolve_text(default: str, translations: dict[str, str] | None) -> str:
-    if not translations:
-        return default
-    locale = normalize_language(current_language()) or DEFAULT_LANGUAGE
-    return (
-        translations.get(locale)
-        or translations.get(DEFAULT_LANGUAGE)
-        or default
-    )
+@cache
+def _load_plugin_catalog(path: str) -> dict[str, Any]:
+    """加载插件语言包；文件不存在是合法的（插件未提供翻译）。"""
+    file_path = Path(path)
+    try:
+        data = json.loads(file_path.read_text(encoding="utf-8"))
+    except FileNotFoundError:
+        return {}
+    except (OSError, json.JSONDecodeError):
+        logger.exception("plugin i18n catalog invalid: {}", file_path)
+        return {}
+    if not isinstance(data, dict):
+        logger.error("plugin i18n catalog root must be an object: {}", file_path)
+        return {}
+    return data
+
+
+class PluginI18n:
+    """插件运行时文本翻译器；语言由宿主当前请求/任务上下文决定。"""
+
+    def __init__(self, plugin_id: str, root_dir: Path | None = None):
+        self.plugin_id = plugin_id
+        self.root_dir = Path(root_dir) if root_dir is not None else None
+
+    @property
+    def locale(self) -> str:
+        return current_language()
+
+    def t(
+        self,
+        key: str,
+        default: str | None = None,
+        **params: Any,
+    ) -> str:
+        return translate_from_catalogs(
+            self._catalogs(),
+            key,
+            default=default,
+            **params,
+        )
+
+    def _catalogs(self) -> dict[str, dict[str, Any]]:
+        if self.root_dir is None:
+            return {}
+        return {
+            locale: _load_plugin_catalog(
+                str(self.root_dir / "i18n" / f"{locale}.json")
+            )
+            for locale in SUPPORTED_LANGUAGES
+        }
+
+
+def localize_config_field(field: Any) -> dict[str, Any]:
+    """把 ConfigField 的 *_i18n 解析成响应字段，并移除内部 i18n 键。"""
+    data = asdict(field)
+    for name in ("label", "description", "hint"):
+        translations = data.pop(f"{name}_i18n", None)
+        if translations is not None and not isinstance(translations, dict):
+            logger.warning(
+                "config field i18n must be a dict: field={} name={}",
+                data.get("key"),
+                name,
+            )
+            translations = None
+        value = data.get(name)
+        if value is not None:
+            data[name] = resolve_text(value, translations)
+        elif translations:
+            localized = resolve_text("", translations)
+            if localized:
+                data[name] = localized
+    return data
 
 
 def localize_json_schema(

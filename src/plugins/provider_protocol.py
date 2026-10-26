@@ -60,6 +60,10 @@ class ConfigField:
     multiline: bool = False
     read_only: bool = False
     hint: str | None = None
+    # 可选多语言展示文案；宿主在返回 provider catalog 时解析。
+    label_i18n: dict[str, str] | None = None
+    description_i18n: dict[str, str] | None = None
+    hint_i18n: dict[str, str] | None = None
 
 
 ProviderDiagnosticCheckStatus: TypeAlias = Literal["ok", "warning", "failed", "skipped"]

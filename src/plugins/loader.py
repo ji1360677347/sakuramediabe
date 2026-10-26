@@ -220,6 +220,7 @@ def _load_plugin_dir(
             deepcopy(plugin_settings.settings.get(plugin_id, {}))
         ),
         data_dir=plugin_dir / "data",
+        plugin_root=plugin_dir,
     )
     context.ensure_data_dir()
     try:

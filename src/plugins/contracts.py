@@ -19,7 +19,8 @@ from src.scheduler.contracts import JobDefinition
 
 # 11：新增图片写入能力（context.movies.set_cover / set_plot_images、
 # context.actors.set_profile_image / clear_profile_image）。
-HOST_API_VERSION = 11
+# 12：新增插件 i18n 能力（context.i18n.t、ranking/provider config 可选 i18n）。
+HOST_API_VERSION = 12
 MIN_SUPPORTED_HOST_API_VERSION = 4
 
 

@@ -2,10 +2,25 @@ import json
 from contextlib import contextmanager
 
 from src.config.config import settings
-from src.i18n.locale import LanguageState, reset_language_state, set_language_state
-from src.plugins.i18n import localize_json_schema, resolve_text
+from src.i18n.locale import (
+    DEFAULT_LANGUAGE,
+    LanguageState,
+    current_language,
+    reset_language_state,
+    set_language_state,
+)
+from src.model import User
+from src.plugins import PluginContext
+from src.plugins.i18n import (
+    PluginI18n,
+    localize_config_field,
+    localize_json_schema,
+    resolve_text,
+)
 from src.plugins.manager import PluginManager
 from src.plugins.manifest import load_manifest_from_dict
+from src.plugins.provider_protocol import ConfigField
+from src.service.system.language_service import task_language_scope
 
 
 @contextmanager
@@ -91,3 +106,127 @@ def test_plugin_manager_list_plugins_localizes_display_name(tmp_path, monkeypatc
     with _language("zh-CN"):
         plugins = PluginManager(root_dir=tmp_path).list_plugins()
     assert plugins[0]["display_name"] == "演示插件"
+
+
+def _write_plugin_catalogs(root):
+    i18n_dir = root / "i18n"
+    i18n_dir.mkdir()
+    (i18n_dir / "zh-CN.json").write_text(
+        json.dumps(
+            {
+                "hello": "你好 {count}",
+                "items": {"one": "{count} 部", "other": "{count} 部"},
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+    (i18n_dir / "en.json").write_text(
+        json.dumps(
+            {
+                "hello": "Hello {count}",
+                "items": {"one": "{count} item", "other": "{count} items"},
+            }
+        ),
+        encoding="utf-8",
+    )
+
+
+def test_plugin_i18n_loads_bundled_catalogs_and_plural(tmp_path):
+    _write_plugin_catalogs(tmp_path)
+    i18n = PluginI18n("demo", tmp_path)
+
+    with _language("en"):
+        assert i18n.t("hello", count=2) == "Hello 2"
+        assert i18n.t("items", count=1) == "1 item"
+        assert i18n.t("items", count=3) == "3 items"
+        assert i18n.t("missing", default="fallback") == "fallback"
+    with _language("zh-CN"):
+        assert i18n.t("hello", count=2) == "你好 2"
+
+
+def test_plugin_context_exposes_i18n(tmp_path):
+    _write_plugin_catalogs(tmp_path)
+    context = PluginContext(
+        plugin_id="demo",
+        settings={},
+        data_dir=tmp_path / "data",
+        plugin_root=tmp_path,
+    )
+
+    with _language("en"):
+        assert context.i18n.t("hello", count=1) == "Hello 1"
+        assert context.i18n.t("missing", default="fallback") == "fallback"
+
+
+def test_localize_config_field_resolves_and_removes_i18n_keys():
+    field = ConfigField(
+        key="token",
+        label="令牌",
+        input="secret",
+        required=True,
+        description="说明",
+        hint="提示",
+        label_i18n={"en": "Token"},
+        description_i18n={"en": "Description"},
+        hint_i18n={"en": "Hint"},
+    )
+
+    with _language("en"):
+        data = localize_config_field(field)
+
+    assert data["label"] == "Token"
+    assert data["description"] == "Description"
+    assert data["hint"] == "Hint"
+    assert "label_i18n" not in data
+    assert "description_i18n" not in data
+    assert "hint_i18n" not in data
+
+
+def test_localize_config_field_preserves_missing_optional_text():
+    field = ConfigField(
+        key="token",
+        label="令牌",
+        input="secret",
+        required=True,
+        description_i18n={"en": "Description"},
+    )
+
+    with _language("zh-CN"):
+        data = localize_config_field(field)
+
+    assert data["description"] is None
+    assert "description_i18n" not in data
+
+
+def test_localize_config_field_ignores_malformed_i18n_map():
+    field = ConfigField(
+        key="token",
+        label="令牌",
+        input="secret",
+        required=True,
+        label_i18n="Token",  # type: ignore[arg-type]
+    )
+
+    data = localize_config_field(field)
+
+    assert data["label"] == "令牌"
+    assert "label_i18n" not in data
+
+
+def test_plugin_i18n_follows_task_language_scope_without_leaking(tmp_path, test_db):
+    _write_plugin_catalogs(tmp_path)
+    user = User.create(username="task", password_hash="x", language="en")
+    i18n = PluginI18n("demo", tmp_path)
+
+    assert current_language() == DEFAULT_LANGUAGE
+    with task_language_scope():
+        assert current_language() == "en"
+        assert i18n.t("hello", count=1) == "Hello 1"
+    assert current_language() == DEFAULT_LANGUAGE
+
+    User.update(language="zh-CN").where(User.id == user.id).execute()
+    with task_language_scope():
+        assert current_language() == "zh-CN"
+        assert i18n.t("hello", count=1) == "你好 1"
+    assert current_language() == DEFAULT_LANGUAGE
