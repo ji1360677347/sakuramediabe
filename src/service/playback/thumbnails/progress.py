@@ -4,6 +4,7 @@ from threading import Event, Lock, Thread
 
 from loguru import logger
 
+from src.i18n import current_language, translate
 from src.model import get_database
 
 
@@ -14,6 +15,8 @@ class ThumbnailTaskProgress:
 
     def __init__(self, reporter):
         self.reporter = reporter
+        # 心跳线程不继承任务线程的语言上下文，这里固定用任务开始时的语言。
+        self.locale = current_language()
         self.payload = None
         self.changed_at = time.monotonic()
         self.last_emit_at = 0.0
@@ -41,7 +44,12 @@ class ThumbnailTaskProgress:
         payload = dict(self.payload)
         elapsed = int(time.monotonic() - self.changed_at)
         if elapsed >= self.INTERVAL_SECONDS:
-            payload["text"] += f" · 本步骤已等待 {elapsed} 秒"
+            payload["text"] += " · " + translate(
+                "tasks.media_thumbnail_generation.progress.waiting",
+                locale=self.locale,
+                seconds=elapsed,
+                default=f"本步骤已等待 {elapsed} 秒",
+            )
         self.reporter.emit(**payload)
         self.last_emit_at = time.monotonic()
 

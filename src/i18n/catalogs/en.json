@@ -256,5 +256,6 @@
   "tasks.media_thumbnail_generation.progress.action.lane_unavailable": "Library of media {media_id} is temporarily unavailable, deferred",
   "tasks.media_thumbnail_generation.progress.action.preparing": "Media {media_id} · Preparing video",
   "tasks.media_thumbnail_generation.progress.action.media_step": "Media {media_id} · {action}",
-  "tasks.media_thumbnail_generation.progress.action.media_finished": "Media {media_id} finished"
+  "tasks.media_thumbnail_generation.progress.action.media_finished": "Media {media_id} finished",
+  "tasks.media_thumbnail_generation.progress.waiting": "waiting {seconds}s for this step"
 }

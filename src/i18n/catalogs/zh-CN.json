@@ -78,5 +78,6 @@
   "tasks.media_thumbnail_generation.progress.action.lane_unavailable": "媒体 {media_id} 所属媒体库暂不可用，已延后",
   "tasks.media_thumbnail_generation.progress.action.preparing": "媒体 {media_id} · 正在准备视频",
   "tasks.media_thumbnail_generation.progress.action.media_step": "媒体 {media_id} · {action}",
-  "tasks.media_thumbnail_generation.progress.action.media_finished": "媒体 {media_id} 处理结束"
+  "tasks.media_thumbnail_generation.progress.action.media_finished": "媒体 {media_id} 处理结束",
+  "tasks.media_thumbnail_generation.progress.waiting": "本步骤已等待 {seconds} 秒"
 }
