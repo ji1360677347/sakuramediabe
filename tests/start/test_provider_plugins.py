@@ -14,6 +14,7 @@ from src.plugins.extensions.media_provider import (
 )
 from src.plugins.loader import PLUGIN_LOAD_ERRORS, load_enabled_plugins
 from src.plugins.provider_protocol import (
+    STORAGE_PROVIDER_METHODS,
     BrowsePage,
     ClipArtifact,
     ConfigField,
@@ -25,12 +26,25 @@ from src.plugins.provider_protocol import (
     RemoteDownloadTask,
     StorageSpaceUsage,
     ThumbnailGeneration,
+    supports_import_source_validation,
     supports_space_usage,
 )
 
 
 def test_plugin_protocol_uses_host_api_v11():
     assert HOST_API_VERSION == 11
+
+
+def test_import_source_validation_is_optional_provider_capability():
+    assert "validate_import_source" not in STORAGE_PROVIDER_METHODS
+    assert supports_import_source_validation(object()) is False
+    assert supports_import_source_validation(_Storage()) is False
+
+    class ValidatingStorage:
+        def validate_import_source(self, *, source_ref, source_disposition):
+            return None
+
+    assert supports_import_source_validation(ValidatingStorage()) is True
 
 
 def test_provider_operation_error_rejects_unknown_code():

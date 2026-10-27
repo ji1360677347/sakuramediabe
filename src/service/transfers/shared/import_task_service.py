@@ -50,6 +50,7 @@ class ImportTaskService:
         allowed_download_statuses: set[str] | None = None,
     ):
         request, library = cls._validated_request(request)
+        cls._validate_import_source(request, library)
         scope_key = library_import_scope_key(library=library)
         try:
             with get_database().atomic():
@@ -589,6 +590,16 @@ class ImportTaskService:
         if library.provider_key == "":
             raise ApiError(422, "invalid_media_library_provider", "媒体库缺少 provider_key")
         return request, library
+
+    @staticmethod
+    def _validate_import_source(request: ImportRequest, library: MediaLibrary) -> None:
+        from src.service.transfers.imports.import_service import MediaImportService
+
+        MediaImportService.validate_import_source(
+            library,
+            source_ref=request.source_ref,
+            source_disposition=request.source_disposition,
+        )
 
     @staticmethod
     def _task_name(request: ImportRequest) -> str:

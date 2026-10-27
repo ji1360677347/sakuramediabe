@@ -395,6 +395,14 @@ class StorageImportSourceIdentityProvider(Protocol):
     def get_import_source_identity(self, *, source: ImportFile) -> str | None: ...
 
 
+class StorageImportSourceValidationProvider(Protocol):
+    """可选能力：同步拒绝与媒体库根重叠的导入源。"""
+
+    def validate_import_source(
+        self, *, source_ref: JsonObject, source_disposition: str
+    ) -> None: ...
+
+
 class StorageMediaTransferSourceProvider(Protocol):
     """Optional capability to expose one managed media file as raw bytes."""
 
@@ -582,6 +590,12 @@ def supports_media_transfer_target(
     )
 
 
+def supports_import_source_validation(
+    provider: object,
+) -> TypeGuard[StorageImportSourceValidationProvider]:
+    return callable(getattr(provider, "validate_import_source", None))
+
+
 def supports_space_usage(provider: object) -> TypeGuard[StorageSpaceProvider]:
     return callable(getattr(provider, "get_space_usage", None))
 
@@ -719,6 +733,7 @@ __all__ = [
     "StagedMediaTransfer",
     "StorageDurationProbeProvider",
     "StorageImportSourceIdentityProvider",
+    "StorageImportSourceValidationProvider",
     "StorageManagedMediaRefScanner",
     "StorageMediaTransferSourceCleanupProvider",
     "StorageMediaTransferSourceProvider",
@@ -732,6 +747,7 @@ __all__ = [
     "ThumbnailArtifact",
     "ThumbnailGeneration",
     "refresh_media_provider_registry",
+    "supports_import_source_validation",
     "supports_media_transfer_source",
     "supports_media_transfer_source_cleanup",
     "supports_media_transfer_target",
