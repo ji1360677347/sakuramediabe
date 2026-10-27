@@ -18,6 +18,7 @@ from src.common.media_paths import (
     movie_asset_relative_dir,
     normalize_asset_dir_name,
 )
+from src.i18n import translate
 from src.model import Movie, MoviePlotImage
 from src.service.catalog.movie_asset_pack_service import MovieAssetPackService
 
@@ -137,12 +138,14 @@ class MovieAssetPackBackfillService:
             reporter.emit(
                 current=completed,
                 total=len(movie_numbers),
-                text=(
-                    f"影片图片打包回填 · 已完成 {completed}/{len(movie_numbers)}"
-                    f" · 已打包 {stats['packed_movies']}"
-                    f" · 已清理 {stats['cleaned_movies']}"
-                    f" · 跳过 {stats['skipped_missing_files']}"
-                    f" · 失败 {stats['failed_movies']}"
+                text=translate(
+                    "tasks.movie_asset_pack_backfill.progress.running",
+                    current=completed,
+                    total=len(movie_numbers),
+                    packed=stats["packed_movies"],
+                    cleaned=stats["cleaned_movies"],
+                    skipped=stats["skipped_missing_files"],
+                    failed=stats["failed_movies"],
                 ),
                 summary_patch=stats,
             )
@@ -162,9 +165,12 @@ class MovieAssetPackBackfillService:
             reporter.emit(
                 current=completed - 1,
                 total=len(movie_numbers),
-                text=(
-                    f"影片图片打包回填 · 正在处理 {completed}/{len(movie_numbers)}"
-                    f" · 已打包 {stats['packed_movies']} · 失败 {stats['failed_movies']}"
+                text=translate(
+                    "tasks.movie_asset_pack_backfill.progress.processing",
+                    current=completed,
+                    total=len(movie_numbers),
+                    packed=stats["packed_movies"],
+                    failed=stats["failed_movies"],
                 ),
                 summary_patch=stats,
             )

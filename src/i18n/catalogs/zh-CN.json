@@ -34,5 +34,15 @@
     "other": "待处理下载任务 {count} 个"
   },
   "tasks.library_import.progress.processed": "已处理下载任务 {current}/{total}",
-  "tasks.library_import.progress.retrying": "正在重试失败视频"
+  "tasks.library_import.progress.retrying": "正在重试失败视频",
+  "tasks.movie_javdb_backfill.progress.running": "JavDB 补录 · 已完成 {current}/{total} · 成功 {succeeded} · 未收录 {not_found} · 失败 {failed}",
+  "tasks.movie_javdb_backfill.progress.querying": "JavDB 补录 · 正在查询 {movie_number} · 已完成 {current}/{total} · 成功 {succeeded} · 未收录 {not_found} · 失败 {failed}",
+  "tasks.movie_interaction_sync.progress.running": "影片互动数同步 · 已完成 {current}/{total} · 成功 {succeeded} · 失败 {failed}",
+  "tasks.movie_interaction_sync.progress.refreshing": "影片互动数同步 · 正在刷新 {movie_number} · 已完成 {current}/{total} · 成功 {succeeded} · 失败 {failed}",
+  "tasks.movie_cover_refresh.progress.running": "封面刷新 · 已完成 {current}/{total} · 刷新 {refreshed} · 失败 {failed} · 跳过 {skipped}",
+  "tasks.movie_cover_refresh.progress.refreshing": "封面刷新 · {movie_number} · 已完成 {current}/{total} · 刷新 {refreshed} · 失败 {failed} · 跳过 {skipped}",
+  "tasks.movie_asset_pack_backfill.progress.running": "影片图片打包回填 · 已完成 {current}/{total} · 已打包 {packed} · 已清理 {cleaned} · 跳过 {skipped} · 失败 {failed}",
+  "tasks.movie_asset_pack_backfill.progress.processing": "影片图片打包回填 · 正在处理 {current}/{total} · 已打包 {packed} · 失败 {failed}",
+  "tasks.actor_gender_backfill.progress.running": "演员性别回填 {mode} {current}/{total} · 修正 {corrected} · 未判定 {unresolved} · 失败 {failed}",
+  "tasks.actor_gender_backfill.progress.aborted": "演员性别回填累计失败 {failed} 个演员，本轮已中断"
 }

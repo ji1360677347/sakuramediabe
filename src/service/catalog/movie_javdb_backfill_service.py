@@ -5,6 +5,7 @@ import time
 from loguru import logger
 
 from src.common.runtime_time import utc_now_for_db
+from src.i18n import translate
 from src.metadata.factory import build_javdb_provider
 from src.metadata.provider import MetadataNotFoundError
 from src.model import Movie
@@ -42,19 +43,21 @@ class MovieJavdbBackfillService:
         logger.info("JavDB backfill started candidate_movies={}", len(ids))
         step = max(len(ids) // 20, 1)
 
-        def progress_text(completed: int, *, action: str | None = None) -> str:
-            fragments = ["JavDB 补录"]
-            if action:
-                fragments.append(action)
-            fragments.extend(
-                (
-                    f"已完成 {completed}/{len(ids)}",
-                    f"成功 {stats['succeeded_movies']}",
-                    f"未收录 {stats['not_found_movies']}",
-                    f"失败 {stats['failed_movies']}",
+        def progress_text(completed: int, *, movie_number: str | None = None) -> str:
+            params = {
+                "current": completed,
+                "total": len(ids),
+                "succeeded": stats["succeeded_movies"],
+                "not_found": stats["not_found_movies"],
+                "failed": stats["failed_movies"],
+            }
+            if movie_number:
+                return translate(
+                    "tasks.movie_javdb_backfill.progress.querying",
+                    movie_number=movie_number,
+                    **params,
                 )
-            )
-            return " · ".join(fragments)
+            return translate("tasks.movie_javdb_backfill.progress.running", **params)
 
         for current, movie_id in enumerate(ids, 1):
             if current > 1:
@@ -71,7 +74,7 @@ class MovieJavdbBackfillService:
             reporter.emit(
                 current=current - 1,
                 total=len(ids),
-                text=progress_text(current - 1, action=f"正在查询 {movie.movie_number}"),
+                text=progress_text(current - 1, movie_number=movie.movie_number),
                 summary_patch=stats,
             )
             try:

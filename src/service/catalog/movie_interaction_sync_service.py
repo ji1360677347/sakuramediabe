@@ -5,6 +5,7 @@ from datetime import timedelta
 from loguru import logger
 
 from src.common.runtime_time import utc_now_for_db
+from src.i18n import translate
 from src.metadata._providers.exceptions import MetadataRequestError
 from src.metadata._providers.javdb import JavdbProvider
 from src.metadata.factory import build_javdb_provider
@@ -97,18 +98,20 @@ class MovieInteractionSyncService:
         logger.info("Movie interaction sync started candidate_movies={}", total)
         step = max(total // 20, 1)
 
-        def progress_text(completed: int, *, action: str | None = None) -> str:
-            fragments = ["影片互动数同步"]
-            if action:
-                fragments.append(action)
-            fragments.extend(
-                (
-                    f"已完成 {completed}/{total}",
-                    f"成功 {stats['succeeded_movies']}",
-                    f"失败 {stats['failed_movies']}",
+        def progress_text(completed: int, *, movie_number: str | None = None) -> str:
+            params = {
+                "current": completed,
+                "total": total,
+                "succeeded": stats["succeeded_movies"],
+                "failed": stats["failed_movies"],
+            }
+            if movie_number:
+                return translate(
+                    "tasks.movie_interaction_sync.progress.refreshing",
+                    movie_number=movie_number,
+                    **params,
                 )
-            )
-            return " · ".join(fragments)
+            return translate("tasks.movie_interaction_sync.progress.running", **params)
 
         for current, movie_id in enumerate(candidate_ids, start=1):
             try:
@@ -116,7 +119,7 @@ class MovieInteractionSyncService:
                 reporter.emit(
                     current=current - 1,
                     total=total,
-                    text=progress_text(current - 1, action=f"正在刷新 {movie.movie_number}"),
+                    text=progress_text(current - 1, movie_number=movie.movie_number),
                     summary_patch=stats,
                 )
                 changed, heat_updated = self._fetch_and_apply(movie)

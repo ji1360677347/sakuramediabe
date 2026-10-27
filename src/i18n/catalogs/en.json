@@ -209,5 +209,18 @@
   },
   "tasks.library_import.progress.processed": "Processed download tasks {current}/{total}",
   "tasks.library_import.progress.retrying": "Retrying failed video",
-  "errors.provider_validation_failed": "The media provider failed to validate the import source"
+  "errors.provider_validation_failed": "The media provider failed to validate the import source",
+  "tasks.movie_javdb_backfill.progress.running": "JavDB backfill · completed {current}/{total} · succeeded {succeeded} · not found {not_found} · failed {failed}",
+  "tasks.movie_javdb_backfill.progress.querying": "JavDB backfill · querying {movie_number} · completed {current}/{total} · succeeded {succeeded} · not found {not_found} · failed {failed}",
+  "tasks.movie_interaction_sync.progress.running": "Movie interaction sync · completed {current}/{total} · succeeded {succeeded} · failed {failed}",
+  "tasks.movie_interaction_sync.progress.refreshing": "Movie interaction sync · refreshing {movie_number} · completed {current}/{total} · succeeded {succeeded} · failed {failed}",
+  "tasks.movie_cover_refresh.progress.running": "Cover refresh · completed {current}/{total} · refreshed {refreshed} · failed {failed} · skipped {skipped}",
+  "tasks.movie_cover_refresh.progress.refreshing": "Cover refresh · {movie_number} · completed {current}/{total} · refreshed {refreshed} · failed {failed} · skipped {skipped}",
+  "tasks.movie_asset_pack_backfill.progress.running": "Movie asset pack backfill · completed {current}/{total} · packed {packed} · cleaned {cleaned} · skipped {skipped} · failed {failed}",
+  "tasks.movie_asset_pack_backfill.progress.processing": "Movie asset pack backfill · processing {current}/{total} · packed {packed} · failed {failed}",
+  "tasks.actor_gender_backfill.progress.running": "Actor gender backfill {mode} {current}/{total} · corrected {corrected} · unresolved {unresolved} · failed {failed}",
+  "tasks.actor_gender_backfill.progress.aborted": {
+    "one": "Actor gender backfill aborted after {failed} actor failure",
+    "other": "Actor gender backfill aborted after {failed} actor failures"
+  }
 }
