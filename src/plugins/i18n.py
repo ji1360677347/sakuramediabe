@@ -16,7 +16,7 @@ from typing import Any
 
 from loguru import logger
 
-from src.i18n.catalog import translate_from_catalogs
+from src.i18n.catalog import translate, translate_from_catalogs
 from src.i18n.locale import (
     DEFAULT_LANGUAGE,
     SUPPORTED_LANGUAGES,
@@ -31,6 +31,7 @@ __all__ = [
     "localize_json_schema",
     "localize_provider_bundle",
     "resolve_text",
+    "validate_plugin_catalogs",
 ]
 
 
@@ -51,6 +52,98 @@ def _load_plugin_catalog(path: str) -> dict[str, Any]:
     return data
 
 
+_PLURAL_FORMS = frozenset({"one", "other"})
+
+
+def validate_plugin_catalogs(root_dir: Path) -> list[str]:
+    """校验插件 ``i18n/{locale}.json`` 的结构，返回错误列表（不抛异常）。
+
+    只检查 ``SUPPORTED_LANGUAGES`` 中实际存在的文件；语言包缺失是合法的。
+    运行时 :class:`PluginI18n` 保持宽松加载，这个入口只服务试加载路径
+    （``plugins check`` 与插件包安装前的校验）；已启用插件不受影响。
+    错误明细走宿主语言包（``plugins.i18n_catalog.*``），按当前请求语言渲染。
+    """
+    errors: list[str] = []
+    i18n_dir = Path(root_dir) / "i18n"
+    if not i18n_dir.is_dir():
+        return errors
+    for locale in SUPPORTED_LANGUAGES:
+        catalog_path = i18n_dir / f"{locale}.json"
+        if not catalog_path.is_file():
+            continue
+        errors.extend(_validate_plugin_catalog(catalog_path))
+    return errors
+
+
+def _validate_plugin_catalog(path: Path) -> list[str]:
+    """校验单个语言包文件；错误明细按当前请求语言渲染。"""
+    file_label = f"i18n/{path.name}"
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        return [
+            translate(
+                "plugins.i18n_catalog.json_invalid",
+                default=f"{file_label}: 无法解析 JSON: {exc}",
+                file=file_label,
+                detail=str(exc),
+            )
+        ]
+    if not isinstance(data, dict):
+        return [
+            translate(
+                "plugins.i18n_catalog.root_not_object",
+                default=f"{file_label}: 根节点必须是 object",
+                file=file_label,
+            )
+        ]
+
+    errors: list[str] = []
+    for key, value in data.items():
+        # 语言包是平铺点分命名空间；空段通常意味着误写嵌套结构。
+        if not key or any(not segment for segment in key.split(".")):
+            errors.append(
+                translate(
+                    "plugins.i18n_catalog.invalid_key",
+                    default=f"{file_label}: key 必须是非空点分字符串: {key!r}",
+                    file=file_label,
+                    key=key,
+                )
+            )
+            continue
+        if isinstance(value, str):
+            continue
+        if isinstance(value, dict) and value and set(value) <= _PLURAL_FORMS:
+            bad_forms = sorted(
+                form for form, text in value.items() if not isinstance(text, str)
+            )
+            if bad_forms:
+                forms = ", ".join(bad_forms)
+                errors.append(
+                    translate(
+                        "plugins.i18n_catalog.plural_not_string",
+                        default=(
+                            f"{file_label}: {key} 的复数形式必须是字符串: {forms}"
+                        ),
+                        file=file_label,
+                        key=key,
+                        forms=forms,
+                    )
+                )
+            continue
+        errors.append(
+            translate(
+                "plugins.i18n_catalog.invalid_value",
+                default=(
+                    f"{file_label}: {key} 的值必须是字符串或 one/other 复数对象"
+                ),
+                file=file_label,
+                key=key,
+            )
+        )
+    return errors
+
+
 class PluginI18n:
     """插件运行时文本翻译器；语言由宿主当前请求/任务上下文决定。"""
 
@@ -68,12 +161,14 @@ class PluginI18n:
         default: str | None = None,
         **params: Any,
     ) -> str:
-        return translate_from_catalogs(
+        rendered = translate_from_catalogs(
             self._catalogs(),
             key,
             default=default,
+            missing=key,
             **params,
         )
+        return key if rendered is None else rendered
 
     def _catalogs(self) -> dict[str, dict[str, Any]]:
         if self.root_dir is None:

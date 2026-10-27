@@ -1,8 +1,12 @@
 import json
+import re
 from contextlib import contextmanager
 from types import SimpleNamespace
 
+import pytest
+
 from src.config.config import settings
+from src.i18n.catalog import translate
 from src.i18n.locale import (
     DEFAULT_LANGUAGE,
     LanguageState,
@@ -11,13 +15,20 @@ from src.i18n.locale import (
     set_language_state,
 )
 from src.model import User
-from src.plugins import PluginContext
+from src.plugins import HOST_API_VERSION, PluginContext
 from src.plugins.i18n import (
     PluginI18n,
     localize_config_field,
     localize_json_schema,
     localize_provider_bundle,
     resolve_text,
+    validate_plugin_catalogs,
+)
+from src.plugins.loader import (
+    PluginLoadError,
+    _load_error_entry,
+    check_plugin_dir,
+    render_plugin_load_error,
 )
 from src.plugins.manager import PluginManager
 from src.plugins.manifest import load_manifest_from_dict
@@ -145,6 +156,182 @@ def test_plugin_i18n_loads_bundled_catalogs_and_plural(tmp_path):
         assert i18n.t("missing", default="fallback") == "fallback"
     with _language("zh-CN"):
         assert i18n.t("hello", count=2) == "你好 2"
+
+
+def test_validate_plugin_catalogs_accepts_missing_and_valid_files(tmp_path):
+    assert validate_plugin_catalogs(tmp_path) == []
+
+    _write_plugin_catalogs(tmp_path)
+    assert validate_plugin_catalogs(tmp_path) == []
+
+    # 缺失语言文件合法，只检查 SUPPORTED_LANGUAGES 中实际存在的文件。
+    (tmp_path / "i18n" / "en.json").unlink()
+    assert validate_plugin_catalogs(tmp_path) == []
+
+
+def test_validate_plugin_catalogs_reports_structure_errors(tmp_path):
+    i18n_dir = tmp_path / "i18n"
+    i18n_dir.mkdir()
+    (i18n_dir / "en.json").write_text(
+        json.dumps(
+            {
+                "": "empty key",
+                "nested.value": {"deep": "not a plural form"},
+                "bad.plural": {"one": 1, "other": "items"},
+                "bad.type": ["list"],
+                "valid": "ok",
+                "valid.plural": {"one": "one", "other": "other"},
+            }
+        ),
+        encoding="utf-8",
+    )
+    (i18n_dir / "zh-CN.json").write_text("[1, 2]", encoding="utf-8")
+
+    errors = validate_plugin_catalogs(tmp_path)
+
+    assert len(errors) == 5
+    assert any("i18n/en.json" in error and "非空点分字符串" in error for error in errors)
+    assert any("nested.value" in error for error in errors)
+    assert any("bad.plural" in error and "one" in error for error in errors)
+    assert any("bad.type" in error for error in errors)
+    assert any("i18n/zh-CN.json" in error and "object" in error for error in errors)
+    assert not any("valid" in error for error in errors)
+
+
+def test_validate_plugin_catalogs_reports_invalid_json(tmp_path):
+    i18n_dir = tmp_path / "i18n"
+    i18n_dir.mkdir()
+    (i18n_dir / "en.json").write_text("{not json", encoding="utf-8")
+
+    errors = validate_plugin_catalogs(tmp_path)
+
+    assert len(errors) == 1
+    assert "i18n/en.json" in errors[0]
+    assert "JSON" in errors[0]
+
+
+def _has_cjk(text: str) -> bool:
+    return re.search(r"[\u4e00-\u9fff]", text) is not None
+
+
+def test_validate_plugin_catalogs_renders_details_in_request_language(tmp_path):
+    i18n_dir = tmp_path / "i18n"
+    i18n_dir.mkdir()
+    (i18n_dir / "en.json").write_text(
+        json.dumps(
+            {
+                "": "empty key",
+                "nested.value": {"deep": "not a plural form"},
+                "bad.plural": {"one": 1, "other": "items"},
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    with _language("en"):
+        errors = validate_plugin_catalogs(tmp_path)
+
+    assert len(errors) == 3
+    assert any("i18n/en.json" in error and "nested.value" in error for error in errors)
+    assert any("bad.plural" in error and "one" in error for error in errors)
+    # 英文界面不出现中文明细。
+    assert not any(_has_cjk(error) for error in errors)
+
+
+def _make_plugin_dir(root):
+    pkg = root / "demo_plugin"
+    pkg.mkdir()
+    (pkg / "manifest.json").write_text(
+        json.dumps(
+            {
+                "plugin_id": "demo_plugin",
+                "display_name": "演示插件",
+                "version": "1.0.0",
+                "host_api_version": HOST_API_VERSION,
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+    (pkg / "__init__.py").write_text(
+        "from src.plugins import HOST_API_VERSION, PluginRegistration\n"
+        "def register(context):\n"
+        "    return PluginRegistration(plugin_id='demo_plugin', "
+        "display_name='演示插件', version='1.0.0', "
+        "host_api_version=HOST_API_VERSION, jobs=())\n",
+        encoding="utf-8",
+    )
+    return pkg
+
+
+def test_check_plugin_dir_reports_catalog_errors_with_host_key(tmp_path):
+    plugin_dir = _make_plugin_dir(tmp_path)
+    i18n_dir = plugin_dir / "i18n"
+    i18n_dir.mkdir()
+    (i18n_dir / "en.json").write_text(
+        json.dumps({"nested.value": {"deep": "not a plural form"}}),
+        encoding="utf-8",
+    )
+
+    with _language("en"), pytest.raises(PluginLoadError) as excinfo:
+        check_plugin_dir(plugin_dir=plugin_dir)
+
+    error = excinfo.value
+    assert error.stage == "i18n"
+    assert error.message_key == "plugins.load_error.i18n_catalog_invalid"
+    details = error.message_params["errors"]
+    assert "nested.value" in details
+    assert not _has_cjk(details)
+
+    with _language("en"):
+        rendered = render_plugin_load_error(_load_error_entry(error))
+
+    assert rendered.startswith("Plugin load failed")
+    assert "Invalid plugin i18n catalog:" in rendered
+    assert "nested.value" in rendered
+    assert not _has_cjk(rendered)
+
+
+def test_check_plugin_dir_reports_catalog_errors_in_default_language(tmp_path):
+    plugin_dir = _make_plugin_dir(tmp_path)
+    i18n_dir = plugin_dir / "i18n"
+    i18n_dir.mkdir()
+    (i18n_dir / "en.json").write_text(
+        json.dumps({"nested.value": {"deep": "not a plural form"}}),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(PluginLoadError) as excinfo:
+        check_plugin_dir(plugin_dir=plugin_dir)
+
+    error = excinfo.value
+    assert error.message_key == "plugins.load_error.i18n_catalog_invalid"
+    # 明细在校验时按当前语言渲染；默认语言是中文。
+    details = error.message_params["errors"]
+    assert "nested.value" in details
+    assert _has_cjk(details)
+
+    zh_rendered = render_plugin_load_error(_load_error_entry(error))
+    with _language("en"):
+        en_rendered = render_plugin_load_error(_load_error_entry(error))
+
+    # 总结文案在渲染时按当前语言走宿主语言包。
+    assert zh_rendered.startswith(
+        translate("plugins.load_error.summary", locale="zh-CN")
+    )
+    assert en_rendered.startswith(
+        translate("plugins.load_error.summary", locale="en")
+    )
+    assert zh_rendered != en_rendered
+
+
+def test_plugin_i18n_runtime_tolerates_invalid_catalog(tmp_path):
+    i18n_dir = tmp_path / "i18n"
+    i18n_dir.mkdir()
+    (i18n_dir / "en.json").write_text("{not json", encoding="utf-8")
+
+    with _language("en"):
+        assert PluginI18n("demo", tmp_path).t("hello", default="fallback") == "fallback"
 
 
 def test_plugin_context_exposes_i18n(tmp_path):

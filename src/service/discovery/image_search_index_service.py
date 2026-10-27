@@ -97,12 +97,20 @@ class ImageSearchIndexService:
                 progress_callback,
                 current=processed,
                 total=total,
-                text=(
-                    f"阶段 {stage_count}/{stage_count} · 构建图像搜索索引"
-                    f" · {'任务完成' if completed else '正在处理当前批次'}"
-                    f" · 已完成 {processed}/{total} · 成功 {summary['succeeded']}"
-                    f" · 失败 {summary['failed']} · 待处理 {pending}"
+                text_key=(
+                    "tasks.image_search_index.progress.building_completed"
+                    if completed
+                    else "tasks.image_search_index.progress.building"
                 ),
+                text_params={
+                    "stage": stage_count,
+                    "stages": stage_count,
+                    "processed": processed,
+                    "total": total,
+                    "succeeded": summary["succeeded"],
+                    "failed": summary["failed"],
+                    "pending": pending,
+                },
                 summary_patch=summary,
             )
             return summary
@@ -112,7 +120,7 @@ class ImageSearchIndexService:
                 progress_callback,
                 current=0,
                 total=0,
-                text="阶段 1/2 · 重置旧索引 · 正在清空图像搜索索引",
+                text_key="tasks.image_search_index.progress.resetting",
             )
             reset_stats = self._reset_for_rebuild()
             if progress_callback is not None:
@@ -120,11 +128,11 @@ class ImageSearchIndexService:
                     progress_callback,
                     current=0,
                     total=0,
-                    text=(
-                        "阶段 1/2 · 重置旧索引 · 已完成"
-                        f" · 缩略图 {reset_stats['thumbnails_reset']} 张"
-                        f" · 剧情图 {reset_stats['plot_images_reset']} 张"
-                    ),
+                    text_key="tasks.image_search_index.progress.reset_completed",
+                    text_params={
+                        "thumbnails": reset_stats["thumbnails_reset"],
+                        "plot_images": reset_stats["plot_images_reset"],
+                    },
                     summary_patch=build_summary(self._pending_image_count()),
                 )
 
@@ -133,10 +141,8 @@ class ImageSearchIndexService:
                 progress_callback,
                 current=0,
                 total=0,
-                text=(
-                    f"阶段 {stage_count}/{stage_count} · 构建图像搜索索引"
-                    " · 正在统计待处理图片"
-                ),
+                text_key="tasks.image_search_index.progress.counting_pending",
+                text_params={"stage": stage_count, "stages": stage_count},
             )
             pending_images = self._pending_image_count()
             logger.info("Image search index started pending_images={}", pending_images)

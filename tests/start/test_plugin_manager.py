@@ -18,6 +18,18 @@ from src.plugins.manager import PluginManager, PluginSettingsValidationError
 from src.start.commands import main
 
 
+@pytest.fixture(autouse=True)
+def _isolate_plugin_settings(monkeypatch):
+    """插件管理测试只依赖本用例写入的配置，不继承仓库 config.toml。
+
+    否则 `plugins.enabled` 里仓库预置的插件会让 set_enabled/install 断言
+    依赖测试执行顺序（单独跑与全量跑结果不一致）。
+    """
+    monkeypatch.setattr(settings, "plugins", settings.plugins.model_copy(deep=True))
+    settings.plugins.enabled = []
+    settings.plugins.settings = {}
+
+
 def _make_plugin_dir(
     tmp_path: Path,
     plugin_id: str = "demo_plugin",
@@ -356,6 +368,45 @@ def test_get_plugin_handles_corrupt_manifest(tmp_path):
     items = manager.list_plugins()
     assert [item["plugin_id"] for item in items] == ["demo_plugin"]
     assert items[0]["load_status"] == "error"
+
+
+def test_get_plugin_strips_internal_i18n_and_localizes_display_name(tmp_path):
+    source = _make_plugin_dir(tmp_path)
+    manifest_path = source / "manifest.json"
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    manifest["display_name_i18n"] = {"en": "Demo Plugin", "zh-CN": "演示"}
+    manifest_path.write_text(
+        json.dumps(manifest, ensure_ascii=False), encoding="utf-8"
+    )
+    manager = PluginManager(root_dir=tmp_path / "root")
+    manager.install(source, enable=False)
+
+    token = set_language_state(LanguageState(header_language="en"))
+    try:
+        detail = manager.get_plugin("demo_plugin")
+    finally:
+        reset_language_state(token)
+
+    assert detail is not None
+    assert detail["display_name"] == "Demo Plugin"
+    assert detail["manifest"]["display_name"] == "Demo Plugin"
+    assert "display_name_i18n" not in detail["manifest"]
+    assert "_i18n" not in json.dumps(detail["manifest"])
+
+
+def test_plugins_cli_check_rejects_invalid_plugin_catalog(tmp_path):
+    plugin_dir = _make_plugin_dir(tmp_path)
+    i18n_dir = plugin_dir / "i18n"
+    i18n_dir.mkdir()
+    (i18n_dir / "en.json").write_text(
+        json.dumps({"nested.value": {"deep": "text"}}),
+        encoding="utf-8",
+    )
+
+    result = CliRunner().invoke(main, ["plugins", "check", str(plugin_dir)])
+
+    assert result.exit_code != 0
+    assert "nested.value" in result.output
 
 
 def test_plugins_cli_list_install_check(monkeypatch, tmp_path):

@@ -8,6 +8,7 @@ from typing import Any
 from peewee import Model, ModelSelect, Ordering, fn
 
 from src.api.exception.errors import ApiError
+from src.i18n import translate
 
 
 def rest_between_requests(min_seconds: float, max_seconds: float) -> float:
@@ -171,9 +172,19 @@ def paginate(
 
 
 def emit_progress(callback, **payload) -> None:
-    """向进度回调发射事件；回调为空时静默跳过。"""
-    if callback is not None:
-        callback(payload)
+    """向进度回调发射事件；回调为空时静默跳过。
+
+    ``text_key`` 是宿主 catalog 的进度文案 key，``text_params`` 是模板占位符参数。
+    发射前用当前语言把 key 渲染成 ``text``；渲染后 payload 只保留 ``text``，
+    未解析的 key 不外泄给消费方。
+    """
+    if callback is None:
+        return
+    text_key = payload.pop("text_key", None)
+    text_params = payload.pop("text_params", None)
+    if text_key and not payload.get("text"):
+        payload["text"] = translate(text_key, **(text_params or {}))
+    callback(payload)
 
 
 def resolve_sort(

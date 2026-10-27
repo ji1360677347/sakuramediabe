@@ -421,7 +421,12 @@ class MomentRecommendationService:
         safe_limit = max(int(limit), 0)
         seeds = self._load_seeds()
         logger.info("Moment recommendation started seed_points={}", len(seeds))
-        emit_progress(progress_callback, current=0, total=0, text="推荐时刻生成 · 正在收集候选")
+        emit_progress(
+            progress_callback,
+            current=0,
+            total=0,
+            text_key="tasks.moment_recommendation_generate.progress.collecting_candidates",
+        )
         candidates_by_thumbnail_id: dict[int, _MomentCandidate] = {}
         visual_candidates = self._collect_visual_candidates(seeds, candidates_by_thumbnail_id) if seeds else 0
         similar_candidates = 0
@@ -452,21 +457,24 @@ class MomentRecommendationService:
             progress_callback,
             current=collected,
             total=0,
-            text=f"推荐时刻生成 · 已收集候选 {collected} 个",
+            text_key="tasks.moment_recommendation_generate.progress.candidates_collected",
+            text_params={"collected": collected},
             summary_patch=build_summary(0),
         )
         emit_progress(
             progress_callback,
             current=collected,
             total=0,
-            text=f"推荐时刻生成 · 正在排序候选 · 已收集 {collected} 个",
+            text_key="tasks.moment_recommendation_generate.progress.ranking_candidates",
+            text_params={"collected": collected},
         )
         ranked = self._rank_candidates(list(candidates_by_thumbnail_id.values()), safe_limit)
         emit_progress(
             progress_callback,
             current=collected,
             total=0,
-            text=f"推荐时刻生成 · 正在写入结果 · 入选 {len(ranked)} 个",
+            text_key="tasks.moment_recommendation_generate.progress.writing_results",
+            text_params={"selected": len(ranked)},
             summary_patch=build_summary(len(ranked)),
         )
         generated_at = utc_now_for_db()

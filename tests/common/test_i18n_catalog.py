@@ -3,7 +3,8 @@ import json
 from pathlib import Path
 from string import Formatter
 
-from src.i18n.catalog import CATALOG_DIR, _select_value, has_translation, translate
+from src.i18n.catalog import CATALOG_DIR, _select_value, translate
+from src.i18n.locale import SUPPORTED_LANGUAGES
 from src.service.system.activity.task_catalog import TASK_NAME_REGISTRY
 
 
@@ -151,8 +152,8 @@ def test_translate_missing_key_returns_default_or_key():
 
 def test_translate_does_not_fall_back_to_chinese_for_errors():
     # zh-CN 的错误不使用 catalog；错误 handler 会显式走状态兜底。
-    assert has_translation("errors.invalid_language", "en") is True
-    assert has_translation("errors.invalid_language", "zh-CN") is False
+    assert "errors.invalid_language" in _load_catalog("en.json")
+    assert "errors.invalid_language" not in _load_catalog("zh-CN.json")
     assert (
         translate(
             "errors.invalid_language",
@@ -162,3 +163,52 @@ def test_translate_does_not_fall_back_to_chinese_for_errors():
         )
         == "errors.invalid_language"
     )
+
+
+def _call_name(node: ast.Call) -> str | None:
+    func = node.func
+    if isinstance(func, ast.Name):
+        return func.id
+    if isinstance(func, ast.Attribute):
+        return func.attr
+    return None
+
+
+def _literal_catalog_keys() -> set[str]:
+    keys: set[str] = set()
+    for path in Path("src").rglob("*.py"):
+        tree = ast.parse(path.read_text(encoding="utf-8"))
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.Call):
+                continue
+            if _call_name(node) in {"translate", "translate_for_display"} and node.args:
+                first = node.args[0]
+                if isinstance(first, ast.Constant) and isinstance(first.value, str):
+                    keys.add(first.value)
+            for keyword in node.keywords:
+                if keyword.arg in {"text_key", "message_key"}:
+                    value = keyword.value
+                    if isinstance(value, ast.Constant) and isinstance(value.value, str):
+                        keys.add(value.value)
+    return keys
+
+
+def test_every_literal_catalog_key_exists():
+    zh = _load_catalog("zh-CN.json")
+    en = _load_catalog("en.json")
+    keys = _literal_catalog_keys()
+    assert keys
+    assert sorted(key for key in keys if key not in en) == []
+    # zh-CN 的 errors.* 只覆盖 handler 兜底用的少量 key，其余错误继续用源码文本。
+    assert sorted(
+        key for key in keys if key not in zh and not key.startswith("errors.")
+    ) == []
+
+
+def test_every_supported_language_has_catalog():
+    missing = [
+        language
+        for language in SUPPORTED_LANGUAGES
+        if not (CATALOG_DIR / f"{language}.json").is_file()
+    ]
+    assert missing == []

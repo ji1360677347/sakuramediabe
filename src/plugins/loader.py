@@ -39,6 +39,7 @@ from src.plugins.extensions.ranking import (
     RANKING_MULTI_SOURCE_HOST_API_VERSION,
     RANKING_SOURCE_EXTENSION_KEY,
 )
+from src.plugins.i18n import validate_plugin_catalogs
 from src.plugins.manifest import MANIFEST_FILENAME, load_manifest_from_file
 from src.plugins.provider_protocol import refresh_media_provider_registry
 from src.scheduler.contracts import JobDefinition
@@ -448,19 +449,33 @@ def check_plugin_dir(
     plugin_dir: Path,
     plugin_settings: Plugins | None = None,
 ) -> PluginRegistration:
-    """校验一个插件目录（import + register + 契约），供 ``plugins check`` 使用。
+    """校验一个插件目录（import + register + 契约 + 语言包结构）。
 
-    插件 ID 取目录名；失败抛 PluginLoadError。校验后清理该插件命名空间的
-    sys.modules 副作用，避免污染后续加载。
+    供 ``plugins check`` 与插件包安装前的试加载共用。插件 ID 取目录名；
+    失败抛 PluginLoadError。校验后清理该插件命名空间的 sys.modules 副作用，
+    避免污染后续加载。
     """
     plugin_dir = Path(plugin_dir)
     plugin_id = plugin_dir.name
     try:
-        return _load_plugin_dir(
+        registration = _load_plugin_dir(
             plugin_id=plugin_id,
             plugin_dir=plugin_dir,
             plugin_settings=plugin_settings or Plugins(),
         )
+        # 语言包只在这条试加载路径上严格校验；运行时 PluginI18n 宽松加载，
+        # 坏语言包不会阻断已启用插件。错误明细走宿主语言包，已按当前请求语言
+        # 渲染；总结文案带 message_key，响应侧可再按语言渲染。
+        catalog_errors = validate_plugin_catalogs(plugin_dir)
+        if catalog_errors:
+            raise PluginLoadError(
+                plugin_id,
+                "i18n",
+                "; ".join(catalog_errors),
+                message_key="plugins.load_error.i18n_catalog_invalid",
+                message_params={"errors": "; ".join(catalog_errors)},
+            )
+        return registration
     finally:
         _clear_plugin_modules(plugin_id)
 
@@ -511,6 +526,7 @@ def load_enabled_plugins(
             }
     rejected_provider_plugins = refresh_media_provider_registry(loaded)
     for rejected_plugin_id in rejected_provider_plugins:
+        # 注册表冲突原因只面向插件作者/日志，没有稳定的宿主文案 key，保留原文。
         PLUGIN_LOAD_ERRORS[rejected_plugin_id] = {
             "stage": "provider_registry",
             "message": "media.provider provider_key 与已加载插件重复",

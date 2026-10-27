@@ -58,6 +58,11 @@ class TaskRunReporter(BaseModel):
         text: str | None = None,
         summary_patch: dict[str, Any] | None = None,
     ) -> None:
+        """上报一次进度。
+
+        ``text`` 是已渲染好的进度文案；宿主任务的文案由调用方用
+        ``translate()`` 按当前语言渲染，插件可以传任意自由文本。
+        """
         if summary_patch:
             self.summary = merge_summary(self.summary, summary_patch)
         from src.service.system.activity.facade import ActivityService

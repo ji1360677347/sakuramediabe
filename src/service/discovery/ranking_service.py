@@ -579,7 +579,7 @@ class RankingSyncService:
             progress_callback,
             current=0,
             total=total_targets,
-            text="开始同步排行榜",
+            text_key="tasks.sakuramedia_javdb_ranking_sync.progress.starting",
             summary_patch=stats,
         )
         for source, board, period in targets:
@@ -603,7 +603,12 @@ class RankingSyncService:
                     progress_callback,
                     current=completed_targets,
                     total=total_targets,
-                    text=f"排行榜同步失败 {resolve_text(source.name, source.name_i18n)}-{resolve_text(board.name, board.name_i18n)}-{period}",
+                    text_key="tasks.sakuramedia_javdb_ranking_sync.progress.failed",
+                    text_params={
+                        "source": resolve_text(source.name, source.name_i18n),
+                        "board": resolve_text(board.name, board.name_i18n),
+                        "period": period,
+                    },
                     summary_patch=stats,
                 )
                 continue
@@ -618,7 +623,12 @@ class RankingSyncService:
                 progress_callback,
                 current=completed_targets,
                 total=total_targets,
-                text=f"已同步 {resolve_text(source.name, source.name_i18n)}-{resolve_text(board.name, board.name_i18n)}-{period}",
+                text_key="tasks.sakuramedia_javdb_ranking_sync.progress.synced",
+                text_params={
+                    "source": resolve_text(source.name, source.name_i18n),
+                    "board": resolve_text(board.name, board.name_i18n),
+                    "period": period,
+                },
                 summary_patch=stats,
             )
         return stats

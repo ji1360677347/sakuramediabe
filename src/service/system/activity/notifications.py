@@ -5,6 +5,8 @@ from dataclasses import dataclass
 from src.common.runtime_time import utc_now_for_db
 from src.common.service_helpers import paginate, validate_page
 from src.i18n import current_language, translate
+from src.i18n.catalog import translate_for_display
+from src.i18n.locale import DEFAULT_LANGUAGE
 from src.model import BackgroundTaskRun, SystemNotification
 from src.model.base import get_database
 from src.schema.common.pagination import PageResponse
@@ -48,6 +50,25 @@ def _detect_failed_summary(summary: dict | None) -> bool:
         if isinstance(value, (int, float)) and value > 0 and "failed" in key:
             return True
     return False
+
+
+def _notification_content(source: str | None, catalog_key: str) -> str:
+    """任务通知正文。
+
+    默认语言直接用任务写入的源文案；其他语言优先 catalog 模板，缺失时才退回
+    原始文本（可能是英文技术信息），绝不回退中文 catalog。
+    """
+    source_text = source or ""
+    if current_language() == DEFAULT_LANGUAGE:
+        return source_text or translate(catalog_key)
+    return translate_for_display(catalog_key, default=source_text) or source_text
+
+
+def _notification_title(catalog_key: str, task_name: str) -> str:
+    return (
+        translate_for_display(catalog_key, default=task_name, task_name=task_name)
+        or task_name
+    )
 
 
 class NotificationService:
@@ -157,22 +178,15 @@ class NotificationService:
         dedupe_key = f"task_run_result:{task_run.id}"
         task_name = resolve_task_name(task_run.task_key, task_run.task_name)
         if failed:
-            content = (
-                translate("notifications.task_failed.content")
-                if current_language() == "en"
-                else (
-                    task_run.error_message
-                    or translate("notifications.task_failed.content")
-                )
-            )
             cls.create_once(
                 NotificationDraft(
                     category="error",
-                    title=translate(
-                        "notifications.task_failed.title",
-                        task_name=task_name,
+                    title=_notification_title(
+                        "notifications.task_failed.title", task_name
                     ),
-                    content=content,
+                    content=_notification_content(
+                        task_run.error_message, "notifications.task_failed.content"
+                    ),
                     event_type="task_run_result",
                     dedupe_key=dedupe_key,
                     resource_type="task_run",
@@ -184,22 +198,15 @@ class NotificationService:
         # 常态成功和 skipped 不发通知，仅带 failed 统计的完成态提示 warning。
         if not _detect_failed_summary(task_run.result_summary or {}):
             return
-        content = (
-            translate("notifications.task_completed.content")
-            if current_language() == "en"
-            else (
-                task_run.result_text
-                or translate("notifications.task_completed.content")
-            )
-        )
         cls.create_once(
             NotificationDraft(
                 category="warning",
-                title=translate(
-                    "notifications.task_completed.title",
-                    task_name=task_name,
+                title=_notification_title(
+                    "notifications.task_completed.title", task_name
                 ),
-                content=content,
+                content=_notification_content(
+                    task_run.result_text, "notifications.task_completed.content"
+                ),
                 event_type="task_run_result",
                 dedupe_key=dedupe_key,
                 resource_type="task_run",

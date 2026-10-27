@@ -4,8 +4,8 @@ from loguru import logger
 from starlette.responses import JSONResponse
 
 from src.api.exception.errors import ApiError
-from src.i18n.catalog import has_translation, translate
-from src.i18n.locale import current_language
+from src.i18n.catalog import translate_for_display
+from src.i18n.locale import DEFAULT_LANGUAGE, current_language
 
 _STATUS_ERROR_FALLBACKS = {
     400: "Invalid request",
@@ -23,17 +23,37 @@ def _localized_error_message(
     status_code: int,
     params: dict | None = None,
 ) -> str:
-    # zh-CN 保持源码 message 逐字不变；只有英文界面走 catalog/通用兜底。
-    if current_language() != "en":
-        return source_message
+    # 默认语言保持源码 message 优先（zh 的多数错误仍是源码中文）；其他语言
+    # 走 catalog → en → 状态码兜底，不做 "== en" 的硬编码分支。
+    locale = current_language()
     key = f"errors.{code}"
-    if has_translation(key, "en"):
-        return translate(
-            key,
-            locale="en",
-            fallback_to_default=False,
-            **(params or {}),
+    resolved_params = params or {}
+    if locale == DEFAULT_LANGUAGE:
+        return (
+            translate_for_display(
+                key,
+                locale=locale,
+                default=source_message,
+                **resolved_params,
+            )
+            or source_message
         )
+    # 通用 HTTP 错误保留状态专属英文文案（404/400 等），避免被
+    # errors.http_error 的通用文案掩盖。
+    if code == "http_error":
+        status_message = _STATUS_ERROR_FALLBACKS.get(status_code)
+        if status_message:
+            return status_message
+        if status_code >= 500:
+            return "Internal server error"
+    message = translate_for_display(
+        key,
+        locale=locale,
+        default=None,
+        **resolved_params,
+    )
+    if message is not None:
+        return message
     if status_code >= 500:
         return "Internal server error"
     return _STATUS_ERROR_FALLBACKS.get(status_code, "Request failed")
@@ -76,13 +96,13 @@ async def http_exception_handler(request, exc):
         return _error_response(
             401,
             "unauthorized",
-            _localized_error_message("unauthorized", str(exc.detail), 401),
+            _localized_error_message("unauthorized", "请先登录", 401),
         )
     if exc.status_code == 403:
         return _error_response(
             403,
             "forbidden",
-            _localized_error_message("forbidden", str(exc.detail), 403),
+            _localized_error_message("forbidden", "没有权限执行此操作", 403),
         )
     return _error_response(
         exc.status_code,
@@ -95,7 +115,11 @@ async def validation_exception_handler(request, exc):
     return _error_response(
         status.HTTP_422_UNPROCESSABLE_ENTITY,
         "validation_error",
-        "Request validation failed",
+        _localized_error_message(
+            "validation_error",
+            "请求参数校验失败",
+            status.HTTP_422_UNPROCESSABLE_ENTITY,
+        ),
         {
             "detail": jsonable_encoder(exc.errors()),
             "body": jsonable_encoder(exc.body),
@@ -118,5 +142,5 @@ async def all_exception_handler(request, exc):
     return _error_response(
         500,
         "internal_error",
-        _localized_error_message("internal_error", "Internal server error", 500),
+        _localized_error_message("internal_error", "服务器内部错误", 500),
     )

@@ -210,7 +210,7 @@ class MovieRecommendationService:
             progress_callback,
             current=0,
             total=total_movies,
-            text="开始构建影片相似度索引",
+            text_key="tasks.movie_similarity_recompute.progress.starting",
             summary_patch=stats,
         )
 
@@ -236,7 +236,11 @@ class MovieRecommendationService:
                 progress_callback,
                 current=stats["indexed_movies"],
                 total=total_movies,
-                text=f"已索引 {stats['indexed_movies']}/{total_movies}",
+                text_key="tasks.movie_similarity_recompute.progress.indexed",
+                text_params={
+                    "indexed": stats["indexed_movies"],
+                    "total": total_movies,
+                },
                 summary_patch=stats,
             )
 
@@ -287,7 +291,7 @@ class MovieRecommendationService:
             progress_callback,
             current=total_movies,
             total=total_movies,
-            text="影片相似度索引构建完成",
+            text_key="tasks.movie_similarity_recompute.progress.completed",
             summary_patch=stats,
         )
         logger.info(

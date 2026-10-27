@@ -443,7 +443,7 @@ class MediaImportService:
             event="scan_complete",
             current=0,
             total=total,
-            text="媒体提供方扫描完成",
+            text_key="tasks.library_import.progress.scan_completed",
             summary_patch={
                 "imported_count": 0,
                 "skipped_count": skipped_count,
@@ -525,7 +525,8 @@ class MediaImportService:
                         event="file_finished",
                         current=index,
                         total=total,
-                        text=f"已处理 {index}/{total}",
+                        text_key="tasks.library_import.progress.file_processed",
+                        text_params={"index": index, "total": total},
                         summary_patch={
                             "imported_count": imported_count,
                             "skipped_count": skipped_count,
@@ -692,7 +693,8 @@ class MediaImportService:
                     event="file_finished",
                     current=index,
                     total=total,
-                    text=f"已处理 {index}/{total}",
+                    text_key="tasks.library_import.progress.file_processed",
+                    text_params={"index": index, "total": total},
                     summary_patch={
                         "imported_count": imported_count,
                         "skipped_count": skipped_count,

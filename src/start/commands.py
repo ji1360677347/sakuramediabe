@@ -474,7 +474,7 @@ def plugins_disable(plugin_id: str):
 @plugins_group.command("check")
 @click.argument("plugin_dir", type=click.Path(exists=True, file_okay=False, path_type=Path))
 def plugins_check(plugin_dir: Path):
-    """校验插件目录（import + register + 契约），供插件作者使用。"""
+    """校验插件目录（import + register + 契约 + 语言包结构），供插件作者使用。"""
     from src.plugins.loader import check_plugin_dir
 
     try:

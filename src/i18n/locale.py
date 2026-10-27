@@ -9,6 +9,8 @@ from contextvars import ContextVar, Token
 from dataclasses import dataclass
 
 DEFAULT_LANGUAGE = "zh-CN"
+# 非默认语言缺译文时的兜底语言；绝不回退到中文源码。
+FALLBACK_LANGUAGE = "en"
 SUPPORTED_LANGUAGES = ("zh-CN", "en")
 
 # 只接受产品明确支持的语言。zh-TW / zh-Hant 不做兼容折叠，避免把繁体

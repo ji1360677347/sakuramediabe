@@ -1,6 +1,6 @@
 """宿主多语言基础设施：语言协商、请求上下文与 JSON 语言包。"""
 
-from src.i18n.catalog import has_translation, translate
+from src.i18n.catalog import translate
 from src.i18n.locale import (
     DEFAULT_LANGUAGE,
     SUPPORTED_LANGUAGES,
@@ -19,7 +19,6 @@ __all__ = [
     "LanguageState",
     "apply_user_language",
     "current_language",
-    "has_translation",
     "normalize_language",
     "parse_accept_language",
     "reset_language_state",

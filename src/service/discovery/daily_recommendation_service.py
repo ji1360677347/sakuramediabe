@@ -324,7 +324,8 @@ class DailyRecommendationService:
                     progress_callback,
                     current=index,
                     total=len(movies),
-                    text=f"每日推荐快照生成 · 正在评分 {index}/{len(movies)}",
+                    text_key="tasks.daily_recommendation_generate.progress.scoring",
+                    text_params={"index": index, "total": len(movies)},
                 )
 
         scored.sort(
@@ -353,7 +354,12 @@ class DailyRecommendationService:
     ) -> dict[str, int | str | bool]:
         snapshot_date = cls._snapshot_date(target_date)
         safe_limit = max(int(limit), 0)
-        emit_progress(progress_callback, current=0, total=0, text="每日推荐快照生成 · 正在读取候选影片")
+        emit_progress(
+            progress_callback,
+            current=0,
+            total=0,
+            text_key="tasks.daily_recommendation_generate.progress.reading_candidates",
+        )
         movies = cls._load_candidate_movies()
         logger.info(
             "Daily recommendation started snapshot_date={} candidate_movies={}",
@@ -364,7 +370,8 @@ class DailyRecommendationService:
             progress_callback,
             current=0,
             total=len(movies),
-            text=f"每日推荐快照生成 · 候选 {len(movies)} 部 · 正在评分",
+            text_key="tasks.daily_recommendation_generate.progress.candidates_ready",
+            text_params={"candidates": len(movies)},
             summary_patch={"candidate_movies": len(movies)},
         )
         scored, score_stats = cls._score_movies(
@@ -384,7 +391,8 @@ class DailyRecommendationService:
             progress_callback,
             current=len(movies),
             total=len(movies),
-            text=f"每日推荐快照生成 · 正在写入快照 · 入选 {len(ranked)} 部",
+            text_key="tasks.daily_recommendation_generate.progress.writing_snapshot",
+            text_params={"selected": len(ranked)},
             summary_patch=stats,
         )
         generated_at = utc_now_for_db()
