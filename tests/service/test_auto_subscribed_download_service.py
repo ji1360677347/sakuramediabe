@@ -4,7 +4,14 @@ from unittest.mock import Mock
 import pytest
 
 from src.api.exception.errors import ApiError
-from src.model import DownloadClient, DownloadTask, MediaLibrary, Movie
+from src.model import (
+    BackgroundTaskRun,
+    DownloadClient,
+    DownloadTask,
+    Media,
+    MediaLibrary,
+    Movie,
+)
 from src.service.catalog.movie_subscription_search_state_service import (
     MovieSubscriptionSearchStateService,
 )
@@ -54,6 +61,8 @@ def _build_service(
         media_replacement_pending=media_replacement_pending,
     )
     monkeypatch.setattr(service, "_select_candidate_ids", Mock(return_value=[movie.id]))
+    monkeypatch.setattr(service, "_library_import_running", Mock(return_value=False))
+    monkeypatch.setattr(service, "_media_exists", Mock(return_value=False))
     monkeypatch.setattr(
         MovieSubscriptionSearchStateService,
         "begin_attempt",
@@ -359,3 +368,74 @@ def test_auto_download_exhausts_old_movie_after_configured_no_candidate_budget(
     assert stored.subscription_search_state == "exhausted"
     assert stored.subscription_search_attempt_count == 3
     assert stored.subscription_search_error_code == "no_candidate_found"
+
+
+def test_auto_download_skips_when_library_import_running(monkeypatch):
+    service, request_service = _build_service(
+        monkeypatch,
+        candidates=[_candidate(title="candidate", source_uri="provider://candidate")],
+        response=None,
+    )
+    monkeypatch.setattr(service, "_library_import_running", Mock(return_value=True))
+
+    summary = service.run(reporter=SimpleNamespace(emit=Mock()))
+
+    assert summary["skipped"] is True
+    assert summary["reason"] == "library_import_running"
+    assert summary["candidate_movies"] == 0
+    assert summary["failed_movies"] == 0
+    service._select_candidate_ids.assert_not_called()
+    request_service.create_request.assert_not_called()
+
+
+def test_library_import_guard_only_counts_running_state(test_db):
+    assert SubscribedMovieAutoDownloadService._library_import_running() is False
+
+    BackgroundTaskRun.create(
+        task_key="library_import",
+        task_name="pending import",
+        trigger_type="manual",
+        state="pending",
+    )
+    assert SubscribedMovieAutoDownloadService._library_import_running() is False
+
+    BackgroundTaskRun.create(
+        task_key="library_import",
+        task_name="running import",
+        trigger_type="manual",
+        state="running",
+    )
+    assert SubscribedMovieAutoDownloadService._library_import_running() is True
+
+
+def test_auto_download_skips_submission_when_media_exists(monkeypatch):
+    service, request_service = _build_service(
+        monkeypatch,
+        candidates=[_candidate(title="candidate", source_uri="provider://candidate")],
+        response=None,
+    )
+    monkeypatch.setattr(service, "_media_exists", Mock(return_value=True))
+
+    summary = service.run(reporter=SimpleNamespace(emit=Mock()))
+
+    assert summary["searched_movies"] == 1
+    assert summary["skipped_movies"] == 1
+    assert summary["submitted_movies"] == 0
+    assert summary["no_candidate_movies"] == 0
+    request_service.create_request.assert_not_called()
+
+
+def test_media_exists_detects_media_row(test_db):
+    library = MediaLibrary.create(
+        name="auto-download-media-library", provider_key="test", provider_config={}
+    )
+    movie = Movie.create(movie_number="MEDIA-001", title="media")
+    assert SubscribedMovieAutoDownloadService._media_exists("MEDIA-001") is False
+
+    Media.create(
+        library=library,
+        movie=movie,
+        file_name="MEDIA-001.mp4",
+        file_size_bytes=100,
+    )
+    assert SubscribedMovieAutoDownloadService._media_exists("MEDIA-001") is True
