@@ -17,6 +17,7 @@ from loguru import logger
 
 from src.common.image_store import write_pack
 from src.common.media_paths import image_pack_relative_path, media_image_root_path
+from src.i18n import translate
 from src.model import Image, MediaThumbnail
 from src.service.playback.operation_locks import (
     MEDIA_LOCK,
@@ -168,12 +169,14 @@ class MediaThumbnailPackBackfillService:
             reporter.emit(
                 current=completed,
                 total=len(media_ids),
-                text=(
-                    f"媒体缩略图打包回填 · 已完成 {completed}/{len(media_ids)}"
-                    f" · 已打包 {stats['packed_media']}"
-                    f" · 已清理 {stats['cleaned_media']}"
-                    f" · 跳过 {stats['skipped_missing_files'] + stats['skipped_busy']}"
-                    f" · 失败 {stats['failed_media']}"
+                text=translate(
+                    "tasks.media_thumbnail_pack_backfill.progress.completed",
+                    current=completed,
+                    total=len(media_ids),
+                    packed=stats["packed_media"],
+                    cleaned=stats["cleaned_media"],
+                    skipped=stats["skipped_missing_files"] + stats["skipped_busy"],
+                    failed=stats["failed_media"],
                 ),
                 summary_patch=stats,
             )
@@ -194,9 +197,12 @@ class MediaThumbnailPackBackfillService:
             reporter.emit(
                 current=completed - 1,
                 total=len(media_ids),
-                text=(
-                    f"媒体缩略图打包回填 · 正在处理 {completed}/{len(media_ids)}"
-                    f" · 已打包 {stats['packed_media']} · 失败 {stats['failed_media']}"
+                text=translate(
+                    "tasks.media_thumbnail_pack_backfill.progress.processing",
+                    current=completed,
+                    total=len(media_ids),
+                    packed=stats["packed_media"],
+                    failed=stats["failed_media"],
                 ),
                 summary_patch=stats,
             )

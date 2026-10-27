@@ -239,5 +239,22 @@
   "tasks.actor_gender_backfill.progress.aborted": {
     "one": "Actor gender backfill aborted after {failed} actor failure",
     "other": "Actor gender backfill aborted after {failed} actor failures"
-  }
+  },
+  "tasks.media_file_scan.progress.scanned": "Media file scan · Checked {current}/{total} · Unchanged {unchanged} · Invalidated {invalidated} · Revived {revived} · Failed {failed}",
+  "tasks.media_thumbnail_pack_backfill.progress.completed": "Thumbnail pack backfill · Completed {current}/{total} · Packed {packed} · Cleaned {cleaned} · Skipped {skipped} · Failed {failed}",
+  "tasks.media_thumbnail_pack_backfill.progress.processing": "Thumbnail pack backfill · Processing {current}/{total} · Packed {packed} · Failed {failed}",
+  "tasks.media_video_info_backfill.progress.completed": "Media info backfill · Completed {current}/{total} · Updated {updated} · Skipped {skipped} · Failed {failed} · Updated but still incomplete {incomplete}",
+  "tasks.media_video_info_backfill.progress.probing": "Media info backfill · Probing {current}/{total} · Updated {updated} · Failed {failed} · Skipped {skipped}",
+  "tasks.media_file_hash_backfill.progress.completed": "Media file hash backfill · Completed {current}/{total} · Updated {updated} · Skipped {skipped} · Failed {failed}",
+  "tasks.media_thumbnail_generation.progress.scan_querying": "Stage 1/2 · Finding pending media · Querying candidates",
+  "tasks.media_thumbnail_generation.progress.scan_completed": "Stage 1/2 · Finding pending media · Query complete · {pending} pending",
+  "tasks.media_thumbnail_generation.progress.generating": "Stage 2/2 · Generating media thumbnails · {action} · Processed {current}/{total} · Succeeded {successful} · Adopted {adopted} · Deferred {deferred} · Failed {failed} · Skipped {skipped}",
+  "tasks.media_thumbnail_generation.progress.validating": "Validating and saving thumbnails",
+  "tasks.media_thumbnail_generation.progress.action.start": "Starting",
+  "tasks.media_thumbnail_generation.progress.action.no_pending": "Task complete · No pending media",
+  "tasks.media_thumbnail_generation.progress.action.finished": "Task complete",
+  "tasks.media_thumbnail_generation.progress.action.lane_unavailable": "Library of media {media_id} is temporarily unavailable, deferred",
+  "tasks.media_thumbnail_generation.progress.action.preparing": "Media {media_id} · Preparing video",
+  "tasks.media_thumbnail_generation.progress.action.media_step": "Media {media_id} · {action}",
+  "tasks.media_thumbnail_generation.progress.action.media_finished": "Media {media_id} finished"
 }
