@@ -34,5 +34,22 @@
     "other": "待处理下载任务 {count} 个"
   },
   "tasks.library_import.progress.processed": "已处理下载任务 {current}/{total}",
-  "tasks.library_import.progress.retrying": "正在重试失败视频"
+  "tasks.library_import.progress.retrying": "正在重试失败视频",
+  "tasks.library_import.progress.retry_completed": "失败视频重试完成",
+  "tasks.library_import.progress.retry_interrupted": "重试任务中断",
+  "tasks.subscribed_movie_auto_download.progress.title": "订阅缺失影片自动下载",
+  "tasks.subscribed_movie_auto_download.progress.searching": "正在搜索 {movie_number}",
+  "tasks.subscribed_movie_auto_download.progress.stats": "已完成 {current}/{total} · 已提交 {submitted} · 未找到 {no_candidate} · 失败 {failed}",
+  "tasks.batch_operation.progress.running": "{operation} {current}/{total}",
+  "tasks.batch_operation.operation.media_delete": "批量删除媒体",
+  "tasks.batch_operation.operation.clip_delete": "批量删除切片",
+  "tasks.batch_operation.operation.media_point_delete": "批量删除时刻",
+  "tasks.batch_operation.operation.video_delete": "批量删除视频",
+  "tasks.batch_operation.operation.clip_collection_add": "批量加入切片合集",
+  "tasks.batch_operation.operation.clip_collection_remove": "批量移出切片合集",
+  "tasks.batch_operation.operation.moment_collection_add": "批量加入时刻合集",
+  "tasks.batch_operation.operation.moment_collection_remove": "批量移出时刻合集",
+  "tasks.batch_operation.operation.video_collection_add": "批量加入视频合集",
+  "tasks.batch_operation.operation.video_collection_remove": "批量移出视频合集",
+  "tasks.batch_operation.operation.download_task_delete": "批量删除下载任务"
 }

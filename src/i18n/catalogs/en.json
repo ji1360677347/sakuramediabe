@@ -209,5 +209,22 @@
   },
   "tasks.library_import.progress.processed": "Processed download tasks {current}/{total}",
   "tasks.library_import.progress.retrying": "Retrying failed video",
-  "errors.provider_validation_failed": "The media provider failed to validate the import source"
+  "errors.provider_validation_failed": "The media provider failed to validate the import source",
+  "tasks.library_import.progress.retry_completed": "Failed video retry completed",
+  "tasks.library_import.progress.retry_interrupted": "Retry task was interrupted",
+  "tasks.subscribed_movie_auto_download.progress.title": "Auto-download subscribed missing movies",
+  "tasks.subscribed_movie_auto_download.progress.searching": "Searching for {movie_number}",
+  "tasks.subscribed_movie_auto_download.progress.stats": "Completed {current}/{total} · Submitted {submitted} · Not found {no_candidate} · Failed {failed}",
+  "tasks.batch_operation.progress.running": "{operation} {current}/{total}",
+  "tasks.batch_operation.operation.media_delete": "Batch delete media",
+  "tasks.batch_operation.operation.clip_delete": "Batch delete clips",
+  "tasks.batch_operation.operation.media_point_delete": "Batch delete moments",
+  "tasks.batch_operation.operation.video_delete": "Batch delete videos",
+  "tasks.batch_operation.operation.clip_collection_add": "Batch add to clip collections",
+  "tasks.batch_operation.operation.clip_collection_remove": "Batch remove from clip collections",
+  "tasks.batch_operation.operation.moment_collection_add": "Batch add to moment collections",
+  "tasks.batch_operation.operation.moment_collection_remove": "Batch remove from moment collections",
+  "tasks.batch_operation.operation.video_collection_add": "Batch add to video collections",
+  "tasks.batch_operation.operation.video_collection_remove": "Batch remove from video collections",
+  "tasks.batch_operation.operation.download_task_delete": "Batch delete download tasks"
 }
