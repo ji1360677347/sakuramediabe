@@ -36,6 +36,7 @@ from src.common.media_paths import (
     movie_asset_relative_dir,
     normalize_asset_dir_name,
 )
+from src.i18n import translate
 from src.metadata.factory import build_javdb_provider
 from src.model import Image, Movie, MoviePlotImage, get_database
 from src.service.catalog.movie_asset_pack_service import MovieAssetPackService
@@ -218,26 +219,28 @@ class MovieCoverRefreshService:
             options.dry_run,
         )
 
-        def progress_text(completed: int, *, action: str | None = None) -> str:
-            fragments = ["封面刷新"]
-            if action:
-                fragments.append(action)
-            fragments.extend(
-                (
-                    f"已完成 {completed}/{total}",
-                    f"刷新 {stats['refreshed_movies']}",
-                    f"失败 {stats['failed_movies']}",
-                    f"跳过 {stats['skipped_movies']}",
+        def progress_text(completed: int, *, movie_number: str | None = None) -> str:
+            params = {
+                "current": completed,
+                "total": total,
+                "refreshed": stats["refreshed_movies"],
+                "failed": stats["failed_movies"],
+                "skipped": stats["skipped_movies"],
+            }
+            if movie_number:
+                return translate(
+                    "tasks.movie_cover_refresh.progress.refreshing",
+                    movie_number=movie_number,
+                    **params,
                 )
-            )
-            return " · ".join(fragments)
+            return translate("tasks.movie_cover_refresh.progress.running", **params)
 
-        def emit(completed: int, *, action: str | None = None) -> None:
+        def emit(completed: int, *, movie_number: str | None = None) -> None:
             with emit_lock:
                 reporter.emit(
                     current=completed,
                     total=total,
-                    text=progress_text(completed, action=action),
+                    text=progress_text(completed, movie_number=movie_number),
                     summary_patch=dict(stats),
                 )
             if completed % 200 == 0:
@@ -322,7 +325,7 @@ class MovieCoverRefreshService:
                         exc,
                     )
                 completed += 1
-                emit(completed, action=movie.movie_number)
+                emit(completed, movie_number=movie.movie_number)
         return completed
 
     def _refresh_movie(self, movie: Movie, *, tenant: str, dry_run: bool) -> None:
