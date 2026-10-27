@@ -5,6 +5,7 @@ from typing import Any
 from loguru import logger
 
 from src.common.runtime_time import utc_now_for_db
+from src.i18n import translate
 from src.model import Media, MediaLibrary, MediaThumbnail
 from src.plugins.provider_protocol import (
     MEDIA_PROVIDER_REGISTRY,
@@ -91,12 +92,14 @@ class MediaValidityScanService:
             reporter.emit(
                 current=completed_count,
                 total=total_media,
-                text=(
-                    f"媒体文件巡检 · 已检查 {completed_count}/{total_media}"
-                    f" · 未变化 {stats['unchanged_media']}"
-                    f" · 失效 {stats['invalidated_media']}"
-                    f" · 恢复 {stats['revived_media']}"
-                    f" · 失败 {stats['failed_media']}"
+                text=translate(
+                    "tasks.media_file_scan.progress.scanned",
+                    current=completed_count,
+                    total=total_media,
+                    unchanged=stats["unchanged_media"],
+                    invalidated=stats["invalidated_media"],
+                    revived=stats["revived_media"],
+                    failed=stats["failed_media"],
                 ),
                 summary_patch=stats,
             )

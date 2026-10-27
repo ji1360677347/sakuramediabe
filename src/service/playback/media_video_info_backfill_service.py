@@ -7,6 +7,7 @@ from peewee import fn
 
 from src.common.media_formats import normalize_media_resolution
 from src.common.runtime_time import utc_now_for_db
+from src.i18n import translate
 from src.model import Media, MediaLibrary
 from src.plugins.provider_protocol import MEDIA_PROVIDER_REGISTRY
 from src.service.playback.operation_locks import (
@@ -126,12 +127,14 @@ class MediaVideoInfoBackfillService:
             reporter.emit(
                 current=completed,
                 total=len(media_ids),
-                text=(
-                    f"媒体信息回填 · 已完成 {completed}/{len(media_ids)}"
-                    f" · 已更新 {stats['updated_media']}"
-                    f" · 跳过 {stats['skipped_media']}"
-                    f" · 失败 {stats['failed_media']}"
-                    f" · 已更新但仍缺失 {stats['incomplete_media']}"
+                text=translate(
+                    "tasks.media_video_info_backfill.progress.completed",
+                    current=completed,
+                    total=len(media_ids),
+                    updated=stats["updated_media"],
+                    skipped=stats["skipped_media"],
+                    failed=stats["failed_media"],
+                    incomplete=stats["incomplete_media"],
                 ),
                 summary_patch=stats,
             )
@@ -150,10 +153,13 @@ class MediaVideoInfoBackfillService:
             reporter.emit(
                 current=completed - 1,
                 total=len(media_ids),
-                text=(
-                    f"媒体信息回填 · 正在探测 {completed}/{len(media_ids)}"
-                    f" · 已更新 {stats['updated_media']} · 失败 {stats['failed_media']}"
-                    f" · 跳过 {stats['skipped_media']}"
+                text=translate(
+                    "tasks.media_video_info_backfill.progress.probing",
+                    current=completed,
+                    total=len(media_ids),
+                    updated=stats["updated_media"],
+                    failed=stats["failed_media"],
+                    skipped=stats["skipped_media"],
                 ),
                 summary_patch=stats,
             )

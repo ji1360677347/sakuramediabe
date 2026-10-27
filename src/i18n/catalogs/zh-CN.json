@@ -34,5 +34,22 @@
     "other": "待处理下载任务 {count} 个"
   },
   "tasks.library_import.progress.processed": "已处理下载任务 {current}/{total}",
-  "tasks.library_import.progress.retrying": "正在重试失败视频"
+  "tasks.library_import.progress.retrying": "正在重试失败视频",
+  "tasks.media_file_scan.progress.scanned": "媒体文件巡检 · 已检查 {current}/{total} · 未变化 {unchanged} · 失效 {invalidated} · 恢复 {revived} · 失败 {failed}",
+  "tasks.media_thumbnail_pack_backfill.progress.completed": "媒体缩略图打包回填 · 已完成 {current}/{total} · 已打包 {packed} · 已清理 {cleaned} · 跳过 {skipped} · 失败 {failed}",
+  "tasks.media_thumbnail_pack_backfill.progress.processing": "媒体缩略图打包回填 · 正在处理 {current}/{total} · 已打包 {packed} · 失败 {failed}",
+  "tasks.media_video_info_backfill.progress.completed": "媒体信息回填 · 已完成 {current}/{total} · 已更新 {updated} · 跳过 {skipped} · 失败 {failed} · 已更新但仍缺失 {incomplete}",
+  "tasks.media_video_info_backfill.progress.probing": "媒体信息回填 · 正在探测 {current}/{total} · 已更新 {updated} · 失败 {failed} · 跳过 {skipped}",
+  "tasks.media_file_hash_backfill.progress.completed": "媒体文件哈希补算 · 已完成 {current}/{total} · 已更新 {updated} · 跳过 {skipped} · 失败 {failed}",
+  "tasks.media_thumbnail_generation.progress.scan_querying": "阶段 1/2 · 查找待处理媒体 · 正在查询候选",
+  "tasks.media_thumbnail_generation.progress.scan_completed": "阶段 1/2 · 查找待处理媒体 · 查询完成 · 待处理 {pending} 部",
+  "tasks.media_thumbnail_generation.progress.generating": "阶段 2/2 · 生成媒体缩略图 · {action} · 已处理 {current}/{total} 部 · 成功 {successful} · 收养 {adopted} · 延后 {deferred} · 失败 {failed} · 跳过 {skipped}",
+  "tasks.media_thumbnail_generation.progress.validating": "正在校验并保存缩略图",
+  "tasks.media_thumbnail_generation.progress.action.start": "开始处理",
+  "tasks.media_thumbnail_generation.progress.action.no_pending": "任务完成 · 无待处理媒体",
+  "tasks.media_thumbnail_generation.progress.action.finished": "任务完成",
+  "tasks.media_thumbnail_generation.progress.action.lane_unavailable": "媒体 {media_id} 所属媒体库暂不可用，已延后",
+  "tasks.media_thumbnail_generation.progress.action.preparing": "媒体 {media_id} · 正在准备视频",
+  "tasks.media_thumbnail_generation.progress.action.media_step": "媒体 {media_id} · {action}",
+  "tasks.media_thumbnail_generation.progress.action.media_finished": "媒体 {media_id} 处理结束"
 }
