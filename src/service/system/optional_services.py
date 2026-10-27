@@ -1,6 +1,7 @@
 """可选向量服务的有效能力；只读启动配置，不做网络探测。"""
 from src.api.exception.errors import ApiError
 from src.config.config import settings
+from src.i18n import translate
 
 
 def movie_similarity_enabled() -> bool:
@@ -26,9 +27,15 @@ def require_image_search() -> None:
 
 def job_disabled_reason(task_key: str) -> str | None:
     if task_key == "image_search_index" and not image_search_enabled():
-        return "图片与文字搜图未启用"
+        return translate(
+            "system.job_disabled.image_search",
+            default="图片与文字搜图未启用",
+        )
     if task_key == "movie_similarity_recompute" and not movie_similarity_enabled():
-        return "相似影片与向量服务未启用"
+        return translate(
+            "system.job_disabled.movie_similarity",
+            default="相似影片与向量服务未启用",
+        )
     return None
 
 

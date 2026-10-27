@@ -8,6 +8,7 @@ from src.common.runtime_time import utc_now_for_db
 from src.config.config import (
     IndexerKind,
 )
+from src.i18n import translate
 from src.model import DownloadClient, Indexer, IndexerDownloadClient
 from src.schema.system.indexer_settings import (
     IndexerBoundClientResource,
@@ -102,7 +103,10 @@ class IndexerSettingsService:
                 indexers_checked=0,
                 error=IndexerConnectionTestError(
                     type="no_indexers_configured",
-                    message="尚未配置任何 indexer，无法测试 Torznab 连通性",
+                    message=translate(
+                        "system.indexer.no_indexers_configured",
+                        default="尚未配置任何 indexer，无法测试 Torznab 连通性",
+                    ),
                 ),
             )
 

@@ -8,10 +8,12 @@ import subprocess
 import sys
 from importlib.metadata import PackageNotFoundError, version
 from pathlib import Path
+from typing import Any
 
 from packaging.requirements import Requirement
 
 from src.config.config import Plugins
+from src.i18n import translate
 from src.plugins.manifest import (
     MANIFEST_FILENAME,
     PluginManifest,
@@ -61,12 +63,12 @@ def _write_failures(root_dir: Path, failures: dict[str, dict[str, object]]) -> N
     temporary_path.replace(path)
 
 
-def dependency_failure_message(
+def dependency_failure_record(
     *,
     root_dir: Path,
     manifest: PluginManifest,
-) -> str | None:
-    """返回仍匹配当前清单的依赖同步失败原因。"""
+) -> dict[str, Any] | None:
+    """返回仍匹配当前清单的依赖同步失败登记（含语言包 key）。"""
     failure = _read_failures(root_dir).get(manifest.plugin_id)
     if (
         failure is None
@@ -74,7 +76,33 @@ def dependency_failure_message(
         or not isinstance(failure.get("message"), str)
     ):
         return None
-    return failure["message"]
+    return failure
+
+
+def render_dependency_failure(failure: dict[str, Any]) -> str:
+    """按当前语言渲染失败原因；旧登记缺少 key 时返回落盘的中文原文。"""
+    message = failure.get("message")
+    message_key = failure.get("message_key")
+    if not isinstance(message, str):
+        return ""
+    if not isinstance(message_key, str):
+        return message
+    params = failure.get("params")
+    return translate(
+        message_key,
+        default=message,
+        **(params if isinstance(params, dict) else {}),
+    )
+
+
+def dependency_failure_message(
+    *,
+    root_dir: Path,
+    manifest: PluginManifest,
+) -> str | None:
+    """返回仍匹配当前清单的依赖同步失败原因，按当前语言渲染。"""
+    failure = dependency_failure_record(root_dir=root_dir, manifest=manifest)
+    return None if failure is None else render_dependency_failure(failure)
 
 
 def enable_dependency_site_packages(root_dir: Path) -> None:
@@ -84,9 +112,18 @@ def enable_dependency_site_packages(root_dir: Path) -> None:
         site.addsitedir(str(site_packages))
 
 
+def _dependency_failure(
+    message_key: str,
+    message: str,
+    **params: Any,
+) -> dict[str, Any]:
+    """构造失败登记：中文原文落盘兜底，key+params 供响应时按语言渲染。"""
+    return {"message_key": message_key, "message": message, "params": params}
+
+
 def _install_dependencies(
     *, site_packages: Path, dependencies: list[str]
-) -> str | None:
+) -> dict[str, Any] | None:
     result = subprocess.run(
         [
             sys.executable,
@@ -107,14 +144,18 @@ def _install_dependencies(
         return None
     details = (result.stderr or result.stdout).strip().splitlines()
     suffix = details[-1] if details else f"pip 退出码 {result.returncode}"
-    return f"依赖安装失败: {suffix}"
+    return _dependency_failure(
+        "plugins.dependency.install_failed",
+        f"依赖安装失败: {suffix}",
+        detail=suffix,
+    )
 
 
 def _validate_effective_dependencies(
     *,
     root_dir: Path,
     dependencies: list[str],
-) -> str | None:
+) -> dict[str, Any] | None:
     """确认当前 Python 实际会解析到的版本满足插件声明。"""
     enable_dependency_site_packages(root_dir)
     for value in dependencies:
@@ -124,15 +165,23 @@ def _validate_effective_dependencies(
         try:
             installed_version = version(requirement.name)
         except PackageNotFoundError:
-            return f"依赖安装失败: 未找到已安装包 {requirement.name}"
+            return _dependency_failure(
+                "plugins.dependency.package_missing",
+                f"依赖安装失败: 未找到已安装包 {requirement.name}",
+                package=requirement.name,
+            )
         if requirement.specifier and not requirement.specifier.contains(
             installed_version,
             prereleases=True,
         ):
-            return (
+            return _dependency_failure(
+                "plugins.dependency.version_unsatisfied",
                 "依赖安装失败: "
                 f"已生效的 {requirement.name}={installed_version} "
-                f"不满足 {value}"
+                f"不满足 {value}",
+                package=requirement.name,
+                version=installed_version,
+                requirement=value,
             )
     return None
 
@@ -158,7 +207,7 @@ def sync_plugin_dependencies(
     """为启用且声明依赖的插件同步依赖，返回每个失败插件的错误。"""
     root_dir = Path(root_dir)
     site_packages = dependency_site_packages_dir(root_dir)
-    failures: dict[str, dict[str, object]] = {}
+    failures: dict[str, dict[str, Any]] = {}
     manifests: dict[str, PluginManifest] = {}
 
     for plugin_id in plugin_settings.enabled:
@@ -179,34 +228,37 @@ def sync_plugin_dependencies(
             continue
         try:
             site_packages.mkdir(parents=True, exist_ok=True)
-            message = _install_dependencies(
+            failure = _install_dependencies(
                 site_packages=site_packages,
                 dependencies=manifest.dependencies,
             )
         except OSError as exc:
-            message = f"依赖安装失败: {exc}"
-        if message is not None:
+            failure = _dependency_failure(
+                "plugins.dependency.install_failed",
+                f"依赖安装失败: {exc}",
+                detail=str(exc),
+            )
+        if failure is not None:
             failures[plugin_id] = {
                 "dependencies": manifest.dependencies,
-                "message": message,
+                **failure,
             }
 
     for plugin_id, manifest in manifests.items():
         if plugin_id in failures:
             continue
-        message = _validate_effective_dependencies(
+        failure = _validate_effective_dependencies(
             root_dir=root_dir,
             dependencies=manifest.dependencies,
         )
-        if message is not None:
+        if failure is not None:
             failures[plugin_id] = {
                 "dependencies": manifest.dependencies,
-                "message": message,
+                **failure,
             }
 
     _write_failures(root_dir, failures)
     return {
-        plugin_id: failure["message"]
+        plugin_id: render_dependency_failure(failure)
         for plugin_id, failure in failures.items()
-        if isinstance(failure["message"], str)
     }
