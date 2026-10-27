@@ -441,7 +441,7 @@ class ImportTaskService:
         reporter.emit(
             current=1,
             total=1,
-            text="失败视频重试完成",
+            text=translate("tasks.library_import.progress.retry_completed"),
             summary_patch={"imported_count": 1, "failed_count": 0},
         )
         return {
@@ -712,7 +712,7 @@ class ImportTaskService:
                     "state": "pending",
                     "last_retry_error": item.get("last_retry_error")
                     or error_message
-                    or "重试任务中断",
+                    or translate("tasks.library_import.progress.retry_interrupted"),
                 },
             )
             return 1
