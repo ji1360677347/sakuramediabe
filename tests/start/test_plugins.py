@@ -3,12 +3,14 @@
 from __future__ import annotations
 
 import json
+from importlib import import_module
 from pathlib import Path
 
 import pytest
 from pydantic import ValidationError
 
 from src.config.config import Plugins
+from src.i18n.locale import LanguageState, reset_language_state, set_language_state
 from src.plugins import HOST_API_VERSION
 from src.plugins.contracts import (
     PluginExtension,
@@ -22,6 +24,7 @@ from src.plugins.extensions.ranking import (
 )
 from src.plugins.loader import (
     PLUGIN_LOAD_ERRORS,
+    _clear_plugin_modules,
     check_plugin_dir,
     load_enabled_plugins,
 )
@@ -76,6 +79,62 @@ def _clear_load_errors():
     PLUGIN_LOAD_ERRORS.clear()
     yield
     PLUGIN_LOAD_ERRORS.clear()
+
+
+def test_loader_merges_manifest_display_name_i18n(tmp_path):
+    plugin_id = "i18n_plugin"
+    init_source = (
+        "from src.plugins import HOST_API_VERSION, PluginContext, PluginRegistration\n"
+        "def register(context):\n"
+        "    return PluginRegistration(plugin_id='i18n_plugin', display_name='x', "
+        "display_name_i18n={'zh-CN': 'I18n 插件'}, version='1.0.0', "
+        "host_api_version=HOST_API_VERSION, jobs=())\n"
+    )
+    pkg = _write_plugin_dir(tmp_path, plugin_id, init_source=init_source)
+    manifest = json.loads((pkg / "manifest.json").read_text(encoding="utf-8"))
+    manifest["display_name_i18n"] = {"en": "I18n plugin"}
+    (pkg / "manifest.json").write_text(
+        json.dumps(manifest, ensure_ascii=False), encoding="utf-8"
+    )
+
+    loaded = load_enabled_plugins(Plugins(enabled=[plugin_id]), root_dir=tmp_path)
+
+    assert loaded[0].display_name_i18n == {
+        "en": "I18n plugin",
+        "zh-CN": "I18n 插件",
+    }
+
+
+def test_loader_passes_plugin_root_to_context_i18n(tmp_path):
+    plugin_id = "i18n_plugin"
+    init_source = (
+        "from src.plugins import HOST_API_VERSION, PluginRegistration\n"
+        "TRANSLATED = None\n"
+        "def register(context):\n"
+        "    global TRANSLATED\n"
+        "    TRANSLATED = context.i18n.t('hello', default='fallback')\n"
+        "    return PluginRegistration(plugin_id='i18n_plugin', display_name='x', "
+        "version='1.0.0', host_api_version=HOST_API_VERSION, jobs=())\n"
+    )
+    pkg = _write_plugin_dir(tmp_path, plugin_id, init_source=init_source)
+    i18n_dir = pkg / "i18n"
+    i18n_dir.mkdir()
+    (i18n_dir / "zh-CN.json").write_text(
+        json.dumps({"hello": "你好"}, ensure_ascii=False), encoding="utf-8"
+    )
+    (i18n_dir / "en.json").write_text(
+        json.dumps({"hello": "Hello"}), encoding="utf-8"
+    )
+
+    token = set_language_state(LanguageState(header_language="en"))
+    try:
+        loaded = load_enabled_plugins(Plugins(enabled=[plugin_id]), root_dir=tmp_path)
+        assert [registration.plugin_id for registration in loaded] == [plugin_id]
+        module = import_module(f"sakuramedia_plugins.{plugin_id}")
+        assert module.TRANSLATED == "Hello"
+    finally:
+        reset_language_state(token)
+        _clear_plugin_modules(plugin_id)
 
 
 def test_plugin_manager_rejects_duplicate_manifest_ids(tmp_path):
@@ -395,7 +454,21 @@ def test_job_definition_rejects_non_object_params():
         job_def.build_executor(["invalid"])
 
 
-def test_host_api_version_range_enforced():
+@pytest.mark.parametrize("version", (4, 11, HOST_API_VERSION))
+def test_host_api_version_accepts_released_range(version):
+    from src.plugins.contracts import PluginRegistration
+
+    registration = PluginRegistration(
+        plugin_id="x",
+        display_name="x",
+        version="1.0.0",
+        host_api_version=version,
+    )
+    assert registration.host_api_version == version
+
+
+@pytest.mark.parametrize("version", (3, HOST_API_VERSION + 1))
+def test_host_api_version_rejects_out_of_range(version):
     from src.plugins.contracts import PluginRegistration
 
     with pytest.raises(ValidationError):
@@ -403,7 +476,7 @@ def test_host_api_version_range_enforced():
             plugin_id="x",
             display_name="x",
             version="1.0.0",
-            host_api_version=HOST_API_VERSION + 1,
+            host_api_version=version,
         )
 
 

@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 
 import peewee
@@ -14,6 +14,7 @@ from src.common.service_helpers import (
     emit_progress,
     with_movie_card_relations,
 )
+from src.i18n.text import resolve_text
 from src.metadata.factory import build_javdb_provider
 from src.model import Movie, RankingItem, get_database
 from src.schema.catalog.movies import MovieListItemResource, MovieRankingResource
@@ -39,6 +40,8 @@ class RankingBoardDefinition:
     supported_periods_provider: Callable[[], tuple[str, ...]] | None = None
     # 番号抓取回调；由插件提供，宿主只负责编排与写库。
     fetch_numbers: Callable[[str], list[str]] | None = None
+    # 可选多语言榜单名；缺失时回退 name。宿主在读取时解析。
+    name_i18n: dict[str, str] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -48,6 +51,8 @@ class RankingSourceDefinition:
     boards: tuple[RankingBoardDefinition, ...]
     # 来源归属插件 ID（内建来源为 None），仅用于 API 展示归属。
     plugin_id: str | None = None
+    # 可选多语言来源名；缺失时回退 name。宿主在读取时解析。
+    name_i18n: dict[str, str] = field(default_factory=dict)
 
     def board_by_key(self, board_key: str) -> RankingBoardDefinition | None:
         for board in self.boards:
@@ -215,9 +220,9 @@ class RankingCatalogService:
             rankings.append(
                 MovieRankingResource(
                     source_key=source.key,
-                    source_name=source.name,
+                    source_name=resolve_text(source.name, source.name_i18n),
                     board_key=board.key,
-                    board_name=board.name,
+                    board_name=resolve_text(board.name, board.name_i18n),
                     period=row.period,
                     rank=row.rank,
                 )
@@ -229,7 +234,7 @@ class RankingCatalogService:
         return [
             RankingSourceResource(
                 source_key=source.key,
-                name=source.name,
+                name=resolve_text(source.name, source.name_i18n),
                 plugin_id=source.plugin_id,
             )
             for source in RANKING_SOURCES.values()
@@ -242,7 +247,7 @@ class RankingCatalogService:
             RankingBoardResource(
                 source_key=source.key,
                 board_key=board.key,
-                name=board.name,
+                name=resolve_text(board.name, board.name_i18n),
                 supported_periods=list(board_supported_periods(board)),
                 default_period=board.default_period,
             )
@@ -598,7 +603,7 @@ class RankingSyncService:
                     progress_callback,
                     current=completed_targets,
                     total=total_targets,
-                    text=f"排行榜同步失败 {source.name}-{board.name}-{period}",
+                    text=f"排行榜同步失败 {resolve_text(source.name, source.name_i18n)}-{resolve_text(board.name, board.name_i18n)}-{period}",
                     summary_patch=stats,
                 )
                 continue
@@ -613,7 +618,7 @@ class RankingSyncService:
                 progress_callback,
                 current=completed_targets,
                 total=total_targets,
-                text=f"已同步 {source.name}-{board.name}-{period}",
+                text=f"已同步 {resolve_text(source.name, source.name_i18n)}-{resolve_text(board.name, board.name_i18n)}-{period}",
                 summary_patch=stats,
             )
         return stats

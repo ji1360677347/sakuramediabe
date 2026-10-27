@@ -14,10 +14,56 @@ def test_get_account_returns_current_account(client, account_user):
     assert response.status_code == 200
     body = response.json()
     assert body["username"] == account_user.username
+    assert body["language"] is None
     assert "created_at" in body
     assert "last_login_at" in body
     assert "Z" not in body["created_at"]
     assert "Z" not in body["last_login_at"]
+
+
+def test_patch_account_updates_language(client, account_user):
+    token = _login(client, username=account_user.username)
+
+    response = client.patch(
+        "/account",
+        headers={"Authorization": f"Bearer {token}"},
+        json={"language": "en-US"},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["language"] == "en"
+    assert account_user.__class__.get_by_id(account_user.id).language == "en"
+
+
+def test_patch_account_rejects_unsupported_language(client, account_user):
+    token = _login(client, username=account_user.username)
+
+    response = client.patch(
+        "/account",
+        headers={
+            "Authorization": f"Bearer {token}",
+            "Accept-Language": "en",
+        },
+        json={"language": "fr"},
+    )
+
+    assert response.status_code == 422
+    body = response.json()
+    assert body["error"]["code"] == "invalid_language"
+    assert body["error"]["message"] == "Unsupported language: fr"
+
+
+def test_patch_account_rejects_empty_payload(client, account_user):
+    token = _login(client, username=account_user.username)
+
+    response = client.patch(
+        "/account",
+        headers={"Authorization": f"Bearer {token}"},
+        json={},
+    )
+
+    assert response.status_code == 422
+    assert response.json()["error"]["code"] == "validation_error"
 
 
 def test_patch_account_updates_username(client, account_user):

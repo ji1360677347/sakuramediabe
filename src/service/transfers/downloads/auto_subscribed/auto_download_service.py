@@ -9,6 +9,7 @@ from peewee import fn
 
 from src.api.exception.errors import ApiError
 from src.common.service_helpers import media_exists_expression
+from src.i18n import translate
 from src.model import BackgroundTaskRun, DownloadTask, Media, Movie
 from src.schema.transfers.downloads import DownloadRequestCreateRequest
 from src.service.catalog.movie_subscription_search_state_service import (
@@ -205,15 +206,19 @@ class SubscribedMovieAutoDownloadService:
             }
 
         def progress_text(completed: int, *, action: str | None = None) -> str:
-            fragments = ["订阅缺失影片自动下载"]
+            fragments = [
+                translate("tasks.subscribed_movie_auto_download.progress.title")
+            ]
             if action:
                 fragments.append(action)
-            fragments.extend(
-                (
-                    f"已完成 {completed}/{total}",
-                    f"已提交 {shared['submitted_movies']}",
-                    f"未找到 {shared['no_candidate_movies']}",
-                    f"失败 {len(shared['failed_items'])}",
+            fragments.append(
+                translate(
+                    "tasks.subscribed_movie_auto_download.progress.stats",
+                    current=completed,
+                    total=total,
+                    submitted=shared["submitted_movies"],
+                    no_candidate=shared["no_candidate_movies"],
+                    failed=len(shared["failed_items"]),
                 )
             )
             return " · ".join(fragments)
@@ -232,7 +237,13 @@ class SubscribedMovieAutoDownloadService:
             reporter.emit(
                 current=current - 1,
                 total=total,
-                text=progress_text(current - 1, action=f"正在搜索 {movie.movie_number}"),
+                text=progress_text(
+                    current - 1,
+                    action=translate(
+                        "tasks.subscribed_movie_auto_download.progress.searching",
+                        movie_number=movie.movie_number,
+                    ),
+                ),
                 summary_patch=summary_patch(),
             )
             try:

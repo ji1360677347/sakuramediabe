@@ -10,6 +10,7 @@ from collections.abc import Callable
 from typing import Any
 
 from src.api.exception.errors import ApiError
+from src.i18n import translate
 from src.schema.system.batch_operations import (
     BatchOperationAcceptedResponse,
     BatchOperationRequest,
@@ -21,25 +22,22 @@ from src.service.system import ActivityService
 class BatchOperationTaskService:
     TASK_KEY = "batch_operation"
 
-    OPERATION_LABELS: dict[BatchOperationType, str] = {
-        BatchOperationType.MEDIA_DELETE: "批量删除媒体",
-        BatchOperationType.CLIP_DELETE: "批量删除切片",
-        BatchOperationType.MEDIA_POINT_DELETE: "批量删除时刻",
-        BatchOperationType.VIDEO_DELETE: "批量删除视频",
-        BatchOperationType.CLIP_COLLECTION_ADD: "批量加入切片合集",
-        BatchOperationType.CLIP_COLLECTION_REMOVE: "批量移出切片合集",
-        BatchOperationType.MOMENT_COLLECTION_ADD: "批量加入时刻合集",
-        BatchOperationType.MOMENT_COLLECTION_REMOVE: "批量移出时刻合集",
-        BatchOperationType.VIDEO_COLLECTION_ADD: "批量加入视频合集",
-        BatchOperationType.VIDEO_COLLECTION_REMOVE: "批量移出视频合集",
-        BatchOperationType.DOWNLOAD_TASK_DELETE: "批量删除下载任务",
+    # 操作名的语言包 key 以枚举值为 slug，新增操作类型只需同步补语言包。
+    OPERATION_LABEL_KEYS: dict[BatchOperationType, str] = {
+        operation: f"tasks.batch_operation.operation.{operation.value}"
+        for operation in BatchOperationType
     }
+
+    @classmethod
+    def operation_label(cls, operation: BatchOperationType) -> str:
+        """按当前语言取操作名；任务名写时落库，之后不再重译。"""
+        return translate(cls.OPERATION_LABEL_KEYS[operation])
 
     @classmethod
     def enqueue(cls, request: BatchOperationRequest) -> BatchOperationAcceptedResponse:
         task = ActivityService.create_task_run(
             task_key=cls.TASK_KEY,
-            task_name=cls.OPERATION_LABELS[request.operation],
+            task_name=cls.operation_label(request.operation),
             trigger_type="manual",
             params=request.model_dump(mode="json"),
         )
@@ -54,7 +52,7 @@ class BatchOperationTaskService:
         """逐项执行；单条失败只记入 failed 清单，不中断剩余项。"""
         request = BatchOperationRequest.model_validate(params)
         action = cls._build_action(request)
-        label = cls.OPERATION_LABELS[request.operation]
+        label = cls.operation_label(request.operation)
         failed: list[dict[str, Any]] = []
         succeeded = 0
         total = len(request.ids)
@@ -67,7 +65,12 @@ class BatchOperationTaskService:
             reporter.emit(
                 current=index,
                 total=total,
-                text=f"{label} {index}/{total}",
+                text=translate(
+                    "tasks.batch_operation.progress.running",
+                    operation=label,
+                    current=index,
+                    total=total,
+                ),
             )
         return {
             "operation": request.operation.value,

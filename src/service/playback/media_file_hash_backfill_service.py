@@ -4,6 +4,7 @@ from typing import Any
 
 from loguru import logger
 
+from src.i18n import translate
 from src.model import Media, MediaLibrary
 from src.plugins.provider_protocol import MEDIA_PROVIDER_REGISTRY
 from src.service.playback.operation_locks import (
@@ -50,11 +51,13 @@ class MediaFileHashBackfillService:
             reporter.emit(
                 current=completed,
                 total=len(media_ids),
-                text=(
-                    f"媒体文件哈希补算 · 已完成 {completed}/{len(media_ids)}"
-                    f" · 已更新 {stats['updated_media']}"
-                    f" · 跳过 {stats['skipped_media']}"
-                    f" · 失败 {stats['failed_media']}"
+                text=translate(
+                    "tasks.media_file_hash_backfill.progress.completed",
+                    current=completed,
+                    total=len(media_ids),
+                    updated=stats["updated_media"],
+                    skipped=stats["skipped_media"],
+                    failed=stats["failed_media"],
                 ),
                 summary_patch=stats,
             )

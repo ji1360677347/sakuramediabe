@@ -1,6 +1,7 @@
 from dataclasses import replace
 from typing import Any
 
+from src.i18n import translate
 from src.schema.system.activity import NotificationResource
 from src.service.system.activity import NotificationDraft, NotificationService
 
@@ -25,8 +26,11 @@ def create_new_media_reminder(
     related_resource_id = unique_items[0].get("movie_id")
     draft = NotificationDraft(
         category="reminder",
-        title="有新的影片可以播放了",
-        content=f"新增了 {len(unique_items)} 个影片",
+        title=translate("notifications.new_media.title"),
+        content=translate(
+            "notifications.new_media.content",
+            count=len(unique_items),
+        ),
         related_task_run_id=related_task_run_id,
         related_resource_type="movie",
         related_resource_id=(

@@ -12,6 +12,18 @@ from src.plugins.provider_protocol import (
 )
 
 
+def _validate_i18n_map(value: object, *, path: str) -> None:
+    if value is None:
+        return
+    if not isinstance(value, dict):
+        raise TypeError(f"{path} 必须是字典或 None")
+    for locale, text in value.items():
+        if not isinstance(locale, str) or not locale.strip():
+            raise ValueError(f"{path} 包含无效语言键")
+        if not isinstance(text, str):
+            raise TypeError(f"{path} 的文本必须是字符串")
+
+
 def _validate_config_fields(
     fields: object,
     *,
@@ -40,6 +52,11 @@ def _validate_config_fields(
             raise TypeError(f"{owner}.config_fields.multiline/read_only 必须是 bool")
         if field.hint is not None and not isinstance(field.hint, str):
             raise TypeError(f"{owner}.config_fields.hint 必须是字符串或 None")
+        for name in ("label_i18n", "description_i18n", "hint_i18n"):
+            _validate_i18n_map(
+                getattr(field, name),
+                path=f"{owner}.config_fields.{field.key}.{name}",
+            )
     return fields
 
 
@@ -90,6 +107,10 @@ def validate_media_provider_extension(
     display_name = getattr(bundle, "display_name", None)
     if not isinstance(display_name, str) or not display_name or display_name.strip() != display_name:
         raise ValueError("media provider display_name 必须是非空字符串")
+    _validate_i18n_map(
+        getattr(bundle, "display_name_i18n", None),
+        path="media provider display_name_i18n",
+    )
 
     _validate_config_fields(
         getattr(bundle, "library_config_fields", None),

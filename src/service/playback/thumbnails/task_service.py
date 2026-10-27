@@ -13,6 +13,7 @@ from peewee import fn
 
 from src.common.database import ensure_database_ready
 from src.common.runtime_time import utc_now_for_db
+from src.i18n import translate
 from src.model import Media, MediaLibrary, MediaThumbnail
 from src.plugins.provider_protocol import (
     MEDIA_PROVIDER_REGISTRY,
@@ -181,7 +182,9 @@ class MediaThumbnailTaskService:
                     deferred_backoff_base_seconds=cls.DEFERRED_BACKOFF_BASE_SECONDS,
                 ) from exc
             if progress_callback:
-                progress_callback("正在校验并保存缩略图")
+                progress_callback(
+                    translate("tasks.media_thumbnail_generation.progress.validating")
+                )
             expected_count = int(generation.expected_count)
             if expected_count < 0:
                 raise RuntimeError("thumbnail_expected_count_invalid")
@@ -421,12 +424,17 @@ class MediaThumbnailTaskService:
         started_at = time.time()
         reporter.emit(
             current=0, total=0,
-            text="阶段 1/2 · 查找待处理媒体 · 正在查询候选",
+            text=translate(
+                "tasks.media_thumbnail_generation.progress.scan_querying"
+            ),
         )
         entries = cls._candidate_entries()
         reporter.emit(
             current=len(entries), total=len(entries),
-            text=f"阶段 1/2 · 查找待处理媒体 · 查询完成 · 待处理 {len(entries)} 部",
+            text=translate(
+                "tasks.media_thumbnail_generation.progress.scan_completed",
+                pending=len(entries),
+            ),
         )
         logger.info("Media thumbnail generation started pending_media={}", len(entries))
         step = max(len(entries) // 20, 1)
@@ -453,19 +461,29 @@ class MediaThumbnailTaskService:
                 force=force,
                 current=completed,
                 total=len(entries),
-                text=(
-                    f"阶段 2/2 · 生成媒体缩略图 · {action}"
-                    f" · 已处理 {completed}/{len(entries)} 部"
-                    f" · 成功 {stats['successful_media']}"
-                    f" · 收养 {stats['adopted_media']}"
-                    f" · 延后 {stats['deferred_media'] + stats['backend_deferred_media']}"
-                    f" · 失败 {stats['retryable_failed_media'] + stats['terminal_failed_media']}"
-                    f" · 跳过 {stats['skipped_media']}"
+                text=translate(
+                    "tasks.media_thumbnail_generation.progress.generating",
+                    action=action,
+                    current=completed,
+                    total=len(entries),
+                    successful=stats["successful_media"],
+                    adopted=stats["adopted_media"],
+                    deferred=stats["deferred_media"] + stats["backend_deferred_media"],
+                    failed=stats["retryable_failed_media"]
+                    + stats["terminal_failed_media"],
+                    skipped=stats["skipped_media"],
                 ),
                 summary_patch=stats,
             )
 
-        emit_progress(0, "开始处理" if entries else "任务完成 · 无待处理媒体")
+        emit_progress(
+            0,
+            translate(
+                "tasks.media_thumbnail_generation.progress.action.start"
+                if entries
+                else "tasks.media_thumbnail_generation.progress.action.no_pending"
+            ),
+        )
         for completed, (media_id, lane) in enumerate(entries, start=1):
             if completed == 1 or completed % step == 0:
                 logger.info(
@@ -478,13 +496,31 @@ class MediaThumbnailTaskService:
                 )
             if lane in paused_lanes:
                 stats["backend_deferred_media"] += 1
-                emit_progress(completed, f"媒体 {media_id} 所属媒体库暂不可用，已延后")
+                emit_progress(
+                    completed,
+                    translate(
+                        "tasks.media_thumbnail_generation.progress.action.lane_unavailable",
+                        media_id=media_id,
+                    ),
+                )
                 continue
-            emit_progress(completed - 1, f"媒体 {media_id} · 正在准备视频")
+            emit_progress(
+                completed - 1,
+                translate(
+                    "tasks.media_thumbnail_generation.progress.action.preparing",
+                    media_id=media_id,
+                ),
+            )
             outcome = cls._generate_one(
                 media_id,
                 progress_callback=lambda action, completed=completed, media_id=media_id: emit_progress(
-                    completed - 1, f"媒体 {media_id} · {action}", force=False,
+                    completed - 1,
+                    translate(
+                        "tasks.media_thumbnail_generation.progress.action.media_step",
+                        media_id=media_id,
+                        action=action,
+                    ),
+                    force=False,
                 ),
             )
             if outcome.state == "backend_unavailable":
@@ -510,9 +546,18 @@ class MediaThumbnailTaskService:
                 stats["terminal_failed_media_ids"].append(media_id)
             else:
                 stats["skipped_media"] += 1
-            emit_progress(completed, f"媒体 {media_id} 处理结束")
+            emit_progress(
+                completed,
+                translate(
+                    "tasks.media_thumbnail_generation.progress.action.media_finished",
+                    media_id=media_id,
+                ),
+            )
         if entries:
-            emit_progress(len(entries), "任务完成")
+            emit_progress(
+                len(entries),
+                translate("tasks.media_thumbnail_generation.progress.action.finished"),
+            )
         logger.info(
             "Finished media thumbnail generation pending_media={} successful_media={} "
             "generated_thumbnails={} terminal_failed_media={} elapsed_ms={}",

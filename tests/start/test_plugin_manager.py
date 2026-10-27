@@ -9,9 +9,11 @@ from pathlib import Path
 import pytest
 from click.testing import CliRunner
 
-from src.config.config import settings
+from src.config.config import Plugins, settings
+from src.i18n import LanguageState, reset_language_state, set_language_state
 from src.plugins import HOST_API_VERSION, MIN_SUPPORTED_HOST_API_VERSION
 from src.plugins.installer import PluginInstallError
+from src.plugins.loader import PLUGIN_LOAD_ERRORS, load_enabled_plugins
 from src.plugins.manager import PluginManager, PluginSettingsValidationError
 from src.start.commands import main
 
@@ -385,3 +387,23 @@ def test_plugins_cli_list_install_check(monkeypatch, tmp_path):
     result = runner.invoke(main, ["plugins", "check", str(bad_dir)])
     assert result.exit_code != 0
     assert "校验失败" in result.output
+
+
+def test_plugin_load_error_renders_in_request_language(tmp_path):
+    _make_plugin_dir(tmp_path, broken_register=True)
+    load_enabled_plugins(Plugins(enabled=["demo_plugin"]), root_dir=tmp_path)
+    try:
+        assert PLUGIN_LOAD_ERRORS["demo_plugin"]["stage"] == "register"
+        manager = PluginManager(root_dir=tmp_path)
+        assert "插件加载失败" in manager.list_plugins()[0]["load_error"]
+
+        token = set_language_state(LanguageState(header_language="en"))
+        try:
+            english_error = manager.list_plugins()[0]["load_error"]
+        finally:
+            reset_language_state(token)
+
+        assert english_error.startswith("Plugin load failed")
+        assert "boom" in english_error
+    finally:
+        PLUGIN_LOAD_ERRORS.clear()

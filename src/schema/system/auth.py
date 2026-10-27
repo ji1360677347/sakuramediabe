@@ -14,6 +14,7 @@ class TokenRefreshRequest(SchemaModel):
 
 class AuthUserSummary(SchemaModel):
     username: str
+    language: str | None = None
 
 
 class TokenResource(SchemaModel):

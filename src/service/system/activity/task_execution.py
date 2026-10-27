@@ -10,6 +10,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from src.model import BackgroundTaskRun
 from src.service.system.activity.task_runs import merge_summary
+from src.service.system.language_service import task_language_scope
 
 
 class TaskRunConflictError(RuntimeError):
@@ -100,7 +101,7 @@ class TaskExecutionService:
             task_logger = None
 
         ctx = logger.contextualize(task=log_task_name) if log_task_name else nullcontext()
-        with ctx:
+        with ctx, task_language_scope():
             if task_logger:
                 task_logger.info("Scheduler task started")
             started_at = time.time()

@@ -4,6 +4,7 @@ from loguru import logger
 
 from src.common.runtime_time import utc_now_for_db
 from src.common.service_helpers import emit_progress
+from src.i18n import translate
 from src.metadata.factory import build_javdb_provider
 from src.model import Actor, Movie, MovieActor
 from src.service.catalog.catalog_import_service import CatalogImportService
@@ -39,7 +40,10 @@ class SubscribedActorMovieSyncService:
             progress_callback,
             current=0,
             total=len(actors),
-            text="开始同步已订阅演员影片",
+            text=translate(
+                "tasks.actor_subscription_sync.progress.start",
+                default="开始同步已订阅演员影片",
+            ),
             summary_patch=stats,
         )
         for index, actor in enumerate(actors, start=1):

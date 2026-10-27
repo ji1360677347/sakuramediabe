@@ -17,15 +17,18 @@ from typing import Any
 from pydantic import BaseModel
 
 from src.config.config import Plugins
+from src.i18n import translate
 from src.plugins.context import PluginContext
 from src.plugins.contracts import (
     HOST_API_VERSION,
+    MIN_SUPPORTED_HOST_API_VERSION,
     PluginRegistration,
     validate_host_api_version,
 )
 from src.plugins.dependencies import (
-    dependency_failure_message,
+    dependency_failure_record,
     enable_dependency_site_packages,
+    render_dependency_failure,
 )
 from src.plugins.extensions import EXTENSION_VALIDATORS, REPEATABLE_EXTENSION_KEYS
 from src.plugins.extensions.metadata import (
@@ -43,16 +46,81 @@ from src.scheduler.contracts import JobDefinition
 PLUGIN_MODULE_NAMESPACE = "sakuramedia_plugins"
 
 # 插件加载错误登记：坏插件隔离，不拖垮整个服务；CLI 据此展示。
-PLUGIN_LOAD_ERRORS: dict[str, dict[str, str]] = {}
+PLUGIN_LOAD_ERRORS: dict[str, dict[str, Any]] = {}
+
+LOAD_ERROR_SUMMARY_KEY = "plugins.load_error.summary"
 
 
 class PluginLoadError(RuntimeError):
-    """已显式启用的插件无法完成加载。"""
+    """已显式启用的插件无法完成加载。
 
-    def __init__(self, plugin_id: str, stage: str, message: str):
+    ``message`` 是中文原文（日志与 CLI 使用）；``message_key``/``message_params``
+    指向宿主语言包，插件管理页在响应时按请求语言渲染。
+    """
+
+    def __init__(
+        self,
+        plugin_id: str,
+        stage: str,
+        message: str,
+        *,
+        message_key: str | None = None,
+        message_params: dict[str, Any] | None = None,
+    ):
         self.plugin_id = plugin_id
         self.stage = stage
+        self.reason = message
+        self.message_key = message_key
+        self.message_params = dict(message_params or {})
         super().__init__(f"插件加载失败 plugin_id={plugin_id} stage={stage}: {message}")
+
+
+def _load_error(
+    plugin_id: str,
+    stage: str,
+    message_key: str | None,
+    reason: str,
+    **params: Any,
+) -> PluginLoadError:
+    """构造带语言包 key 的加载错误；``reason`` 保留中文原文兜底。"""
+    return PluginLoadError(
+        plugin_id,
+        stage,
+        reason,
+        message_key=message_key,
+        message_params=params,
+    )
+
+
+def _load_error_entry(error: PluginLoadError) -> dict[str, Any]:
+    """登记失败插件；``message`` 供日志/CLI 直接展示。"""
+    return {
+        "stage": error.stage,
+        "plugin_id": error.plugin_id,
+        "message": str(error),
+        "reason": error.reason,
+        "message_key": error.message_key,
+        "message_params": error.message_params,
+    }
+
+
+def render_plugin_load_error(entry: dict[str, Any]) -> str:
+    """按当前语言渲染加载错误登记项。
+
+    调度器侧登记的条目和未知异常没有语言包 key，原样返回中文 message。
+    """
+    message = str(entry.get("message", ""))
+    message_key = entry.get("message_key")
+    if not isinstance(message_key, str):
+        return message
+    params = entry.get("message_params")
+    reason = translate(
+        message_key,
+        default=str(entry.get("reason") or message),
+        **(params if isinstance(params, dict) else {}),
+    )
+    summary = translate(LOAD_ERROR_SUMMARY_KEY, default="插件加载失败")
+    return f"{summary} plugin_id={entry.get('plugin_id')} stage={entry.get('stage')}: {reason}"
 
 
 def _clear_plugin_modules(plugin_id: str) -> None:
@@ -75,7 +143,12 @@ def _import_plugin_package(plugin_dir: Path, plugin_id: str):
         submodule_search_locations=[str(plugin_dir)],
     )
     if spec is None or spec.loader is None:
-        raise PluginLoadError(plugin_id, "import", "无法创建插件模块 spec")
+        raise _load_error(
+            plugin_id,
+            "import",
+            "plugins.load_error.module_spec_failed",
+            "无法创建插件模块 spec",
+        )
     module = importlib.util.module_from_spec(spec)
     # 先注册再 exec，保证插件内部的相对导入（from .settings import ...）可解析。
     sys.modules[module_name] = module
@@ -120,21 +193,30 @@ def _validate_plugin_jobs(
     """插件任务校验：task_key 唯一、禁止自填来源、禁止引用宿主 Scheduler 字段。"""
     task_keys = {job.task_key for job in registration.jobs}
     if len(task_keys) != len(registration.jobs):
-        raise PluginLoadError(plugin_id, "validate_jobs", "插件内部 task_key 重复")
+        raise _load_error(
+            plugin_id,
+            "validate_jobs",
+            "plugins.load_error.job_task_key_duplicate",
+            "插件内部 task_key 重复",
+        )
 
     jobs: list[JobDefinition] = []
     for job in registration.jobs:
         if job.plugin_id is not None:
-            raise PluginLoadError(
+            raise _load_error(
                 plugin_id,
                 "validate_jobs",
+                "plugins.load_error.job_plugin_id_forbidden",
                 f"任务 {job.task_key} 不允许自行声明 plugin_id",
+                task_key=job.task_key,
             )
         if job.cron_setting is not None:
-            raise PluginLoadError(
+            raise _load_error(
                 plugin_id,
                 "validate_jobs",
+                "plugins.load_error.job_cron_setting_forbidden",
                 f"任务 {job.task_key} 不允许引用宿主 Scheduler 字段",
+                task_key=job.task_key,
             )
         jobs.append(job.model_copy(update={"plugin_id": plugin_id}))
     return tuple(jobs)
@@ -156,26 +238,33 @@ def _validate_plugin_extensions(
             extension.key in seen
             and extension.key not in REPEATABLE_EXTENSION_KEYS
         ):
-            raise PluginLoadError(
+            raise _load_error(
                 plugin_id,
                 "validate_extensions",
+                "plugins.load_error.extension_key_duplicate",
                 f"扩展点 key 重复: {extension.key}",
+                extension_key=extension.key,
             )
         seen.add(extension.key)
         validator = EXTENSION_VALIDATORS.get(extension.key)
         if validator is None:
-            raise PluginLoadError(
+            raise _load_error(
                 plugin_id,
                 "validate_extensions",
+                "plugins.load_error.extension_unsupported",
                 f"宿主不支持该扩展点: {extension.key}",
+                extension_key=extension.key,
             )
         try:
             validator(plugin_id=plugin_id, extension=extension)
         except Exception as exc:
-            raise PluginLoadError(
+            raise _load_error(
                 plugin_id,
                 "validate_extensions",
+                "plugins.load_error.extension_validation_failed",
                 f"扩展点 {extension.key} 校验失败: {exc}",
+                extension_key=extension.key,
+                error=str(exc),
             ) from exc
 
 
@@ -188,30 +277,60 @@ def _load_plugin_dir(
     """加载单个插件目录：manifest → import → register → 契约校验。"""
     manifest = load_manifest_from_file(plugin_dir)
     if manifest.plugin_id != plugin_id:
-        raise PluginLoadError(
-            plugin_id, "resolve", f"manifest.plugin_id={manifest.plugin_id} 与启用项不一致"
+        raise _load_error(
+            plugin_id,
+            "resolve",
+            "plugins.load_error.manifest_plugin_id_mismatch",
+            f"manifest.plugin_id={manifest.plugin_id} 与启用项不一致",
+            manifest_plugin_id=manifest.plugin_id,
         )
     try:
         validate_host_api_version(manifest.host_api_version)
     except ValueError as exc:
-        raise PluginLoadError(plugin_id, "validate_manifest", str(exc)) from exc
-    dependency_error = dependency_failure_message(
+        raise _load_error(
+            plugin_id,
+            "validate_manifest",
+            "plugins.load_error.host_api_incompatible",
+            str(exc),
+            version=manifest.host_api_version,
+            min_version=MIN_SUPPORTED_HOST_API_VERSION,
+            max_version=HOST_API_VERSION,
+        ) from exc
+    dependency_failure = dependency_failure_record(
         root_dir=plugin_dir.parent,
         manifest=manifest,
     )
-    if dependency_error is not None:
-        raise PluginLoadError(plugin_id, "dependencies", dependency_error)
+    if dependency_failure is not None:
+        reason = render_dependency_failure(dependency_failure)
+        failure_key = dependency_failure.get("message_key")
+        failure_params = dependency_failure.get("params")
+        raise _load_error(
+            plugin_id,
+            "dependencies",
+            failure_key if isinstance(failure_key, str) else None,
+            reason,
+            **(failure_params if isinstance(failure_params, dict) else {}),
+        )
     enable_dependency_site_packages(plugin_dir.parent)
 
     try:
         module = _import_plugin_package(plugin_dir, plugin_id)
     except Exception as exc:
-        raise PluginLoadError(plugin_id, "import", f"无法导入插件包: {exc}") from exc
+        raise _load_error(
+            plugin_id,
+            "import",
+            "plugins.load_error.import_failed",
+            f"无法导入插件包: {exc}",
+            error=str(exc),
+        ) from exc
 
     register = getattr(module, "register", None)
     if not callable(register):
-        raise PluginLoadError(
-            plugin_id, "resolve_register", "插件包根未暴露可调用的 register(context)"
+        raise _load_error(
+            plugin_id,
+            "resolve_register",
+            "plugins.load_error.register_missing",
+            "插件包根未暴露可调用的 register(context)",
         )
 
     context = PluginContext(
@@ -220,6 +339,7 @@ def _load_plugin_dir(
             deepcopy(plugin_settings.settings.get(plugin_id, {}))
         ),
         data_dir=plugin_dir / "data",
+        plugin_root=plugin_dir,
     )
     context.ensure_data_dir()
     try:
@@ -227,24 +347,31 @@ def _load_plugin_dir(
     except Exception as exc:
         if isinstance(exc, PluginLoadError):
             raise
-        raise PluginLoadError(
+        raise _load_error(
             plugin_id,
             "register",
+            "plugins.load_error.register_failed",
             f"register(context) 执行或返回值校验失败: {exc}",
+            error=str(exc),
         ) from exc
 
     if registration.plugin_id != plugin_id:
-        raise PluginLoadError(
+        raise _load_error(
             plugin_id,
             "validate_registration",
+            "plugins.load_error.registration_plugin_id_mismatch",
             f"register 返回的 plugin_id={registration.plugin_id} 与配置不一致",
+            returned_plugin_id=registration.plugin_id,
         )
     if registration.version != manifest.version:
-        raise PluginLoadError(
+        raise _load_error(
             plugin_id,
             "validate_registration",
+            "plugins.load_error.registration_version_mismatch",
             "register 返回的 version 与 manifest 不一致: "
             f"register={registration.version} manifest={manifest.version}",
+            register_version=registration.version,
+            manifest_version=manifest.version,
         )
     # Legacy packages exist in both forms: some retain their v4 registration,
     # while the official plugins import the host's current constant at
@@ -254,20 +381,29 @@ def _load_plugin_dir(
         HOST_API_VERSION,
     }
     if registration.host_api_version not in supported_registration_versions:
-        raise PluginLoadError(
+        raise _load_error(
             plugin_id,
             "validate_registration",
+            "plugins.load_error.registration_host_api_mismatch",
             "register 返回的 host_api_version 与 manifest/宿主版本不兼容: "
             f"register={registration.host_api_version} "
             f"manifest={manifest.host_api_version} host={HOST_API_VERSION}",
+            register_version=registration.host_api_version,
+            manifest_version=manifest.host_api_version,
+            host_version=HOST_API_VERSION,
         )
 
     if (
         any(ext.key == METADATA_SOURCE_EXTENSION_KEY for ext in registration.extensions)
         and manifest.host_api_version < METADATA_SOURCE_HOST_API_VERSION
     ):
-        raise PluginLoadError(
-            plugin_id, "validate_extensions", "元数据来源插件的 manifest 必须声明 Host API 6 或更高版本"
+        raise _load_error(
+            plugin_id,
+            "validate_extensions",
+            "plugins.load_error.metadata_source_host_api_too_low",
+            "元数据来源插件的 manifest 必须声明 Host API "
+            f"{METADATA_SOURCE_HOST_API_VERSION} 或更高版本",
+            min_version=METADATA_SOURCE_HOST_API_VERSION,
         )
     if (
         sum(
@@ -278,11 +414,13 @@ def _load_plugin_dir(
         > 1
         and manifest.host_api_version < RANKING_MULTI_SOURCE_HOST_API_VERSION
     ):
-        raise PluginLoadError(
+        raise _load_error(
             plugin_id,
             "validate_extensions",
+            "plugins.load_error.ranking_multi_source_host_api_too_low",
             "声明多个排行榜来源的插件 manifest 必须声明 Host API "
             f"{RANKING_MULTI_SOURCE_HOST_API_VERSION} 或更高版本",
+            min_version=RANKING_MULTI_SOURCE_HOST_API_VERSION,
         )
 
     jobs = _validate_plugin_jobs(
@@ -295,6 +433,13 @@ def _load_plugin_dir(
     )
     return registration.model_copy(update={
         "jobs": jobs, "host_api_version": manifest.host_api_version,
+        # 插件可以只在 manifest 或 registration 里声明展示名翻译；manifest 是
+        # 安装期就能读到的兼容边界，registration 未提供时用它补全，两边都有
+        # 时以 registration 为准。
+        "display_name_i18n": {
+            **manifest.display_name_i18n,
+            **registration.display_name_i18n,
+        },
     })
 
 
@@ -341,7 +486,12 @@ def load_enabled_plugins(
         plugin_dir = root / plugin_id
         try:
             if not (plugin_dir / MANIFEST_FILENAME).is_file():
-                raise PluginLoadError(plugin_id, "resolve", "插件未安装（缺少 manifest.json）")
+                raise _load_error(
+                    plugin_id,
+                    "resolve",
+                    "plugins.load_error.not_installed",
+                    "插件未安装（缺少 manifest.json）",
+                )
             registration = _load_plugin_dir(
                 plugin_id=plugin_id,
                 plugin_dir=plugin_dir,
@@ -351,12 +501,10 @@ def load_enabled_plugins(
             PLUGIN_LOAD_ERRORS.pop(plugin_id, None)
         except PluginLoadError as exc:
             _clear_plugin_modules(plugin_id)
-            PLUGIN_LOAD_ERRORS[plugin_id] = {
-                "stage": exc.stage,
-                "message": str(exc),
-            }
+            PLUGIN_LOAD_ERRORS[plugin_id] = _load_error_entry(exc)
         except Exception as exc:
             _clear_plugin_modules(plugin_id)
+            # 未分类异常没有稳定文案，保留原始文本（可能包含插件自己的报错）。
             PLUGIN_LOAD_ERRORS[plugin_id] = {
                 "stage": "load",
                 "message": str(exc),

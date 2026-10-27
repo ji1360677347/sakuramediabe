@@ -4,6 +4,39 @@ from loguru import logger
 from starlette.responses import JSONResponse
 
 from src.api.exception.errors import ApiError
+from src.i18n.catalog import has_translation, translate
+from src.i18n.locale import current_language
+
+_STATUS_ERROR_FALLBACKS = {
+    400: "Invalid request",
+    401: "Please sign in again",
+    403: "You do not have permission to perform this action",
+    404: "The requested resource was not found",
+    409: "The request conflicts with the current state",
+    422: "Request validation failed",
+}
+
+
+def _localized_error_message(
+    code: str,
+    source_message: str,
+    status_code: int,
+    params: dict | None = None,
+) -> str:
+    # zh-CN 保持源码 message 逐字不变；只有英文界面走 catalog/通用兜底。
+    if current_language() != "en":
+        return source_message
+    key = f"errors.{code}"
+    if has_translation(key, "en"):
+        return translate(
+            key,
+            locale="en",
+            fallback_to_default=False,
+            **(params or {}),
+        )
+    if status_code >= 500:
+        return "Internal server error"
+    return _STATUS_ERROR_FALLBACKS.get(status_code, "Request failed")
 
 
 def _error_response(
@@ -30,7 +63,9 @@ async def api_error_handler(request, exc: ApiError):
     return _error_response(
         exc.status_code,
         exc.code,
-        exc.message,
+        _localized_error_message(
+            exc.code, exc.message, exc.status_code, exc.params
+        ),
         exc.details,
         exc.response_headers,
     )
@@ -38,13 +73,21 @@ async def api_error_handler(request, exc: ApiError):
 
 async def http_exception_handler(request, exc):
     if exc.status_code == 401:
-        return _error_response(401, "unauthorized", str(exc.detail))
+        return _error_response(
+            401,
+            "unauthorized",
+            _localized_error_message("unauthorized", str(exc.detail), 401),
+        )
     if exc.status_code == 403:
-        return _error_response(403, "forbidden", str(exc.detail))
+        return _error_response(
+            403,
+            "forbidden",
+            _localized_error_message("forbidden", str(exc.detail), 403),
+        )
     return _error_response(
         exc.status_code,
         "http_error",
-        str(exc.detail),
+        _localized_error_message("http_error", str(exc.detail), exc.status_code),
     )
 
 
@@ -66,8 +109,14 @@ async def all_exception_handler(request, exc):
         return _error_response(
             exc.status_code,
             exc.code,
-            exc.message,
+            _localized_error_message(
+                exc.code, exc.message, exc.status_code, exc.params
+            ),
             exc.details,
             exc.response_headers,
         )
-    return _error_response(500, "internal_error", "Internal server error")
+    return _error_response(
+        500,
+        "internal_error",
+        _localized_error_message("internal_error", "Internal server error", 500),
+    )

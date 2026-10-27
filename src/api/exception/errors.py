@@ -6,6 +6,7 @@ class ApiError(Exception):
         message: str,
         details: dict | None = None,
         response_headers: dict[str, str] | None = None,
+        params: dict | None = None,
     ) -> None:
         super().__init__(message)
         self.status_code = status_code
@@ -13,3 +14,4 @@ class ApiError(Exception):
         self.message = message
         self.details = details
         self.response_headers = response_headers
+        self.params = params

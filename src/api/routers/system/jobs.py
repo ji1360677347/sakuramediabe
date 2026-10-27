@@ -4,11 +4,13 @@ from fastapi import APIRouter, Depends, status
 from src.api.exception.errors import ApiError
 from src.api.routers.deps import db_deps, get_current_user
 from src.model import BackgroundTaskRun
+from src.plugins.i18n import localize_json_schema
 from src.scheduler.contracts import JobDefinition
 from src.scheduler.registry import JOB_REGISTRY, JOB_REGISTRY_BY_KEY
 from src.schema.system.activity import TaskRunResource
 from src.schema.system.jobs import JobMetadataResource, ManualJobTriggerResponse
 from src.service.system.activity import TaskRunConflictError
+from src.service.system.activity.task_text import resolve_job_cli_help
 from src.service.system.optional_services import job_disabled_reason
 from src.start.aps import get_job_cron_setting, resolve_job_cron_expr, submit_manual_job
 
@@ -38,14 +40,14 @@ def _build_job_metadata(job_def: JobDefinition, last_run: BackgroundTaskRun | No
         task_key=job_def.task_key,
         log_name=job_def.log_name,
         cli_name=job_def.cli_name,
-        cli_help=job_def.cli_help,
+        cli_help=resolve_job_cli_help(job_def),
         plugin_id=job_def.plugin_id,
         cron_setting=get_job_cron_setting(job_def),
         cron_expr=resolve_job_cron_expr(job_def),
         disabled_reason=disabled_reason,
         manual_trigger_allowed=job_def.manual_trigger_allowed and not disabled_reason,
         params_schema=(
-            job_def.params_schema.model_json_schema()
+            localize_json_schema(job_def.params_schema.model_json_schema())
             if job_def.params_schema is not None
             else None
         ),

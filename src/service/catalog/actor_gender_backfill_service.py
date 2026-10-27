@@ -8,6 +8,7 @@ from loguru import logger
 from peewee import JOIN, Case, fn
 
 from src.common.runtime_time import utc_now_for_db
+from src.i18n import translate
 from src.metadata.factory import build_javdb_provider
 from src.metadata.provider import MetadataNotFoundError, MetadataRequestError
 from src.model import Actor, Movie, MovieActor
@@ -131,7 +132,11 @@ class ActorGenderBackfillService:
         if stats["aborted"]:
             logger.error("演员性别回填中断 stats={}", stats)
             raise RuntimeError(
-                f"演员性别回填累计失败 {stats['errors']} 个演员，本轮已中断"
+                translate(
+                    "tasks.actor_gender_backfill.progress.aborted",
+                    count=stats["errors"],
+                    failed=stats["errors"],
+                )
             )
         logger.info("演员性别回填完成 stats={}", stats)
         return stats
@@ -266,11 +271,14 @@ class ActorGenderBackfillService:
         reporter.emit(
             current=current,
             total=total,
-            text=(
-                f"演员性别回填 {stats['mode']} {current}/{total}"
-                f" · 修正 {stats['corrected']}"
-                f" · 未判定 {stats['unresolved']}"
-                f" · 失败 {stats['errors']}"
+            text=translate(
+                "tasks.actor_gender_backfill.progress.running",
+                mode=stats["mode"],
+                current=current,
+                total=total,
+                corrected=stats["corrected"],
+                unresolved=stats["unresolved"],
+                failed=stats["errors"],
             ),
             summary_patch=dict(stats),
         )

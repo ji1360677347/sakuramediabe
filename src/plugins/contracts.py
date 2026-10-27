@@ -19,7 +19,8 @@ from src.scheduler.contracts import JobDefinition
 
 # 11：新增图片写入能力（context.movies.set_cover / set_plot_images、
 # context.actors.set_profile_image / clear_profile_image）。
-HOST_API_VERSION = 11
+# 12：新增插件 i18n 能力（context.i18n.t、ranking/provider config 可选 i18n）。
+HOST_API_VERSION = 12
 MIN_SUPPORTED_HOST_API_VERSION = 4
 
 
@@ -63,6 +64,8 @@ class PluginRegistration(BaseModel):
 
     plugin_id: str = Field(min_length=1, max_length=64)
     display_name: str = Field(min_length=1)
+    # 可选多语言展示名；manifest 与注册声明都支持，缺失时回退 display_name。
+    display_name_i18n: dict[str, str] = Field(default_factory=dict)
     version: str = Field(min_length=1)
     host_api_version: int = HOST_API_VERSION
     # 任务不要求至少一个：插件可以是纯能力型（未来扩展），零任务同样合法。
