@@ -24,6 +24,7 @@ from src.plugins.loader import (
     PluginLoadError,
     check_plugin_dir,
     load_plugin_settings_model,
+    render_plugin_load_error,
 )
 from src.plugins.manifest import (
     MANIFEST_FILENAME,
@@ -45,6 +46,12 @@ class PluginSettingsValidationError(ValueError):
 
 def _plugin_root() -> Path:
     return Path(settings.plugins.root_dir).expanduser()
+
+
+def _load_error_text(plugin_id: str) -> str | None:
+    """按当前请求语言渲染插件加载错误。"""
+    entry = PLUGIN_LOAD_ERRORS.get(plugin_id)
+    return None if entry is None else render_plugin_load_error(entry)
 
 
 class PluginManager:
@@ -120,7 +127,7 @@ class PluginManager:
             )
             load_error = (
                 manifest_error
-                or PLUGIN_LOAD_ERRORS.get(plugin_id, {}).get("message")
+                or _load_error_text(plugin_id)
                 or dependency_error
             )
             plugins.append(
@@ -161,7 +168,7 @@ class PluginManager:
         )
         load_error = (
             manifest_error
-            or PLUGIN_LOAD_ERRORS.get(plugin_id, {}).get("message")
+            or _load_error_text(plugin_id)
             or dependency_error
         )
         manifest_payload = manifest.model_dump() if manifest else {}

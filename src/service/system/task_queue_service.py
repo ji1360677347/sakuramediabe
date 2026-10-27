@@ -21,6 +21,7 @@ from typing import Any
 from peewee import IntegrityError, fn
 
 from src.common.runtime_time import utc_now_for_db
+from src.i18n import translate
 from src.model import BackgroundTaskRun
 from src.model.base import get_database
 from src.service.system.activity.task_runs import TaskRunService
@@ -30,6 +31,7 @@ QUEUE_MUTEX_PREFIX = "aps:"
 DEFAULT_LEASE_SECONDS = 300
 LEASE_EXPIRED_ERROR_MESSAGE = "任务租约过期，执行进程已中断，任务按失败回收"
 BOOTSTRAP_LEASE_EXPIRED_ERROR_MESSAGE = "启动引导任务租约过期，已回收并重新入队"
+INTERRUPTED_ERROR_MESSAGE = "任务执行进程重启，执行已中断"
 INTERNAL_FAILURE_CODE_KEY = "_failure_code"
 FAILURE_CODE_QUEUE_LEASE_EXPIRED = "queue_lease_expired"
 BOOTSTRAP_QUEUE_TASK_KEYS = frozenset(
@@ -125,7 +127,10 @@ class TaskQueueService:
                 # 只处理当前 bootstrap 冲突行；其它过期租约仍由 worker housekeeper 负责。
                 TaskRunService.fail_task_run(
                     task_run.id,
-                    error_message=BOOTSTRAP_LEASE_EXPIRED_ERROR_MESSAGE,
+                    error_message=translate(
+                        "system.queue.bootstrap_lease_expired",
+                        default=BOOTSTRAP_LEASE_EXPIRED_ERROR_MESSAGE,
+                    ),
                     result_summary={
                         INTERNAL_FAILURE_CODE_KEY: FAILURE_CODE_QUEUE_LEASE_EXPIRED
                     },
@@ -237,14 +242,17 @@ class TaskQueueService:
             return [
                 TaskRunService.fail_task_run(
                     task_run.id,
-                    error_message="任务执行进程重启，执行已中断",
+                    error_message=translate(
+                        "system.queue.interrupted_on_restart",
+                        default=INTERRUPTED_ERROR_MESSAGE,
+                    ),
                 )
                 for task_run in interrupted
             ]
 
     @classmethod
     def recover_expired_leases(
-        cls, *, error_message: str = LEASE_EXPIRED_ERROR_MESSAGE
+        cls, *, error_message: str | None = None
     ) -> list[BackgroundTaskRun]:
         """在单个 PostgreSQL 事务内锁定并回收租约过期的 running 行。
 
@@ -252,6 +260,10 @@ class TaskQueueService:
         heartbeat 先持锁/续租则本轮跳过，recovery 先持锁则 heartbeat 的 state 条件更新
         为 0，并发 recovery 也只有持锁方能完成终态与通知。领域侧联动仍由调用方处理。
         """
+        message = error_message or translate(
+            "system.queue.lease_expired",
+            default=LEASE_EXPIRED_ERROR_MESSAGE,
+        )
         current = utc_now_for_db()
         recovered: list[BackgroundTaskRun] = []
         with get_database().atomic():
@@ -275,7 +287,7 @@ class TaskQueueService:
                     continue
                 recovered_run = TaskRunService.fail_task_run(
                     task_run.id,
-                    error_message=error_message,
+                    error_message=message,
                     result_summary={
                         INTERNAL_FAILURE_CODE_KEY: FAILURE_CODE_QUEUE_LEASE_EXPIRED
                     },
