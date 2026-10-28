@@ -140,5 +140,9 @@
   "tasks.library_import.progress.file_processed": "已处理 {index}/{total}",
   "tasks.sakuramedia_javdb_ranking_sync.progress.starting": "开始同步排行榜",
   "tasks.sakuramedia_javdb_ranking_sync.progress.failed": "排行榜同步失败 {source}-{board}-{period}",
-  "tasks.sakuramedia_javdb_ranking_sync.progress.synced": "已同步 {source}-{board}-{period}"
+  "tasks.sakuramedia_javdb_ranking_sync.progress.synced": "已同步 {source}-{board}-{period}",
+  "playlists.system.favorites.name": "收藏",
+  "playlists.system.favorites.description": "手动收藏的影片列表",
+  "playlists.system.recently_played.name": "最近播放",
+  "playlists.system.recently_played.description": "系统自动维护的最近播放影片列表"
 }

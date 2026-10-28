@@ -347,5 +347,9 @@
   "tasks.library_import.progress.file_processed": "Processed {index}/{total}",
   "tasks.sakuramedia_javdb_ranking_sync.progress.starting": "Starting ranking sync",
   "tasks.sakuramedia_javdb_ranking_sync.progress.failed": "Ranking sync failed {source}-{board}-{period}",
-  "tasks.sakuramedia_javdb_ranking_sync.progress.synced": "Synced {source}-{board}-{period}"
+  "tasks.sakuramedia_javdb_ranking_sync.progress.synced": "Synced {source}-{board}-{period}",
+  "playlists.system.favorites.name": "Favorites",
+  "playlists.system.favorites.description": "Movies you have favorited manually",
+  "playlists.system.recently_played.name": "Recently Played",
+  "playlists.system.recently_played.description": "Recently played movies, maintained automatically by the system"
 }

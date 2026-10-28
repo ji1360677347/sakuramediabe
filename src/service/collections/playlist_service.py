@@ -19,8 +19,8 @@ from src.common.service_helpers import (
     resolve_sort_expression,
     with_movie_card_relations,
 )
+from src.i18n.playlist_names import system_playlist_reserved_names
 from src.model import (
-    FAVORITES_PLAYLIST_NAME,
     PLAYLIST_KIND_CUSTOM,
     PLAYLIST_KIND_FAVORITES,
     PLAYLIST_KIND_RECENTLY_PLAYED,
@@ -65,7 +65,8 @@ class PlaylistService:
     SYSTEM_KINDS = set(SYSTEM_PLAYLIST_KINDS)
     # 成员可由用户增删的列表：自定义列表 + 系统收藏；最近播放由播放进度维护。
     MEMBER_MUTABLE_KINDS = {PLAYLIST_KIND_CUSTOM, PLAYLIST_KIND_FAVORITES}
-    RESERVED_NAMES = {RECENTLY_PLAYED_PLAYLIST_NAME, FAVORITES_PLAYLIST_NAME}
+    # 系统列表在所有语言下的名字都是保留名，避免界面出现两个同名列表。
+    RESERVED_NAMES = system_playlist_reserved_names()
 
     @staticmethod
     def _playlist_system_order():
