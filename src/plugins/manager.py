@@ -171,14 +171,20 @@ class PluginManager:
             or _load_error_text(plugin_id)
             or dependency_error
         )
-        # manifest 的 display_name_i18n 是内部字段，响应只暴露解析后的展示字段。
+        # manifest 的 *_i18n 是内部字段，响应只暴露解析后的展示字段。
         manifest_payload = (
-            manifest.model_dump(exclude={"display_name_i18n"}) if manifest else {}
+            manifest.model_dump(exclude={"display_name_i18n", "description_i18n"})
+            if manifest
+            else {}
         )
         if manifest is not None:
             manifest_payload["display_name"] = resolve_text(
                 manifest.display_name, manifest.display_name_i18n
             )
+            if manifest.description is not None:
+                manifest_payload["description"] = resolve_text(
+                    manifest.description, manifest.description_i18n
+                )
         return {
             "plugin_id": plugin_id,
             "display_name": (

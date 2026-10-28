@@ -94,6 +94,36 @@ def test_manifest_accepts_optional_display_name_i18n():
     assert manifest.display_name_i18n == {"en": "Demo plugin"}
 
 
+def test_manifest_accepts_optional_description_i18n():
+    manifest = load_manifest_from_dict(
+        {
+            "plugin_id": "demo",
+            "display_name": "演示插件",
+            "description": "演示插件的用途说明",
+            "description_i18n": {"en": "What the demo plugin does"},
+            "version": "1.0.0",
+            "host_api_version": 11,
+        }
+    )
+
+    assert manifest.description == "演示插件的用途说明"
+    assert manifest.description_i18n == {"en": "What the demo plugin does"}
+
+
+def test_manifest_description_is_optional():
+    manifest = load_manifest_from_dict(
+        {
+            "plugin_id": "demo",
+            "display_name": "演示插件",
+            "version": "1.0.0",
+            "host_api_version": 11,
+        }
+    )
+
+    assert manifest.description is None
+    assert manifest.description_i18n == {}
+
+
 def test_plugin_manager_list_plugins_localizes_display_name(tmp_path, monkeypatch):
     monkeypatch.setattr(settings, "plugins", settings.plugins.model_copy(deep=True))
     settings.plugins.enabled = []

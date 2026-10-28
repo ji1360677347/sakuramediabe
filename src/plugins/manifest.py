@@ -23,6 +23,10 @@ class PluginManifest(BaseModel):
     display_name: str = Field(min_length=1)
     # 可选多语言展示名；缺失时回退 display_name。由宿主在响应时解析。
     display_name_i18n: dict[str, str] = Field(default_factory=dict)
+    # 可选插件简介与多语言简介。宿主不展示简介，插件市场索引从已发布
+    # Release 的 manifest 读取这两个字段作为市场文案的唯一来源。
+    description: str | None = None
+    description_i18n: dict[str, str] = Field(default_factory=dict)
     version: str = Field(min_length=1)
     host_api_version: int = Field(ge=1)
     settings_model: str | None = Field(default=None, pattern=r"^[A-Za-z_][A-Za-z0-9_]*$")

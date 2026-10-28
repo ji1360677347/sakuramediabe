@@ -375,6 +375,8 @@ def test_get_plugin_strips_internal_i18n_and_localizes_display_name(tmp_path):
     manifest_path = source / "manifest.json"
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
     manifest["display_name_i18n"] = {"en": "Demo Plugin", "zh-CN": "演示"}
+    manifest["description"] = "演示插件"
+    manifest["description_i18n"] = {"en": "Demo plugin", "zh-CN": "演示插件"}
     manifest_path.write_text(
         json.dumps(manifest, ensure_ascii=False), encoding="utf-8"
     )
@@ -390,6 +392,7 @@ def test_get_plugin_strips_internal_i18n_and_localizes_display_name(tmp_path):
     assert detail is not None
     assert detail["display_name"] == "Demo Plugin"
     assert detail["manifest"]["display_name"] == "Demo Plugin"
+    assert detail["manifest"]["description"] == "Demo plugin"
     assert "display_name_i18n" not in detail["manifest"]
     assert "_i18n" not in json.dumps(detail["manifest"])
 
