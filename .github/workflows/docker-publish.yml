@@ -108,9 +108,12 @@ jobs:
             ${{ steps.meta.outputs.labels }}
             org.opencontainers.image.version=${{ github.event.release.tag_name }}
           # 只有 CI 发布构建内置官方插件：本地手动 docker build 不带该参数即不下载任何插件。
+          # REFRESH 随发版 tag 变化，让内置插件每次发版都重新解析 latest Release，
+          # 否则 BuildKit 会复用旧层、把上一版插件固化进镜像。
           build-args: |
             SAKURAMEDIA_BACKEND_VERSION=${{ github.event.release.tag_name }}
             SAKURAMEDIA_BUNDLED_PLUGINS=1
+            SAKURAMEDIA_BUNDLED_PLUGINS_REFRESH=${{ github.event.release.tag_name }}
           # 构建期解析插件 latest release 用 token，避免 Actions 共享出口 IP 触发 API 限流；
           # 通过 BuildKit secret 传入，不会落进镜像层或 history。
           secrets: |
