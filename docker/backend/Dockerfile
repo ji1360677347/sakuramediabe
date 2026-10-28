@@ -13,7 +13,7 @@ RUN pip install --no-cache-dir --prefix=/install -r requirements.txt
 # 命令与 build arg，于是同一份源码的重复发版会直接复用旧层、把上一版插件固化进镜像。
 # 发布流水线传 SAKURAMEDIA_BUNDLED_PLUGINS_REFRESH=<本次 tag>，让每次发版都重新解析
 # 插件 latest Release。
-FROM python:3.10-slim-bookworm@sha256:68d914ec641a0b69267ce65184d000a2bc3a9ee2590ab702b82250ab2385735e2a AS bundled
+FROM python:3.10-slim-bookworm@sha256:68d914ec641a0b69267ce65184d000a2bc3a9ee2590ab702b82250ab2385735a AS bundled
 ARG SAKURAMEDIA_BUNDLED_PLUGINS=0
 ARG SAKURAMEDIA_BUNDLED_PLUGIN_PINS=""
 ARG SAKURAMEDIA_BUNDLED_PLUGINS_REFRESH=""
