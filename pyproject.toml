@@ -48,6 +48,7 @@ dependencies = [
     "certifi>=2026.4.22",
     # Python 3.10 无 typing.Self，代码里直接 import typing_extensions，显式声明而非依赖 pydantic 传递引入。
     "typing-extensions>=4.6.0",
+    "beautifulsoup4>=4.12,<5",
 ]
 
 [dependency-groups]
